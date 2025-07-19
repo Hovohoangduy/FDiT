@@ -1,1 +1,1 @@
-# cLFDM
+# Latent Flow Diffusion Model with GenTron
