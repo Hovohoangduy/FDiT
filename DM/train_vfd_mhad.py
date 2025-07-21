@@ -15,17 +15,18 @@ from misc import Logger, grid2fig, conf2fig
 from DM.datasets_mhad import MHAD
 import sys
 import random
-from DM.modules.vfdm_with_LoRA import FlowDiffusion
+from sync_batchnorm import DataParallelWithCallback
+# from DM.modules.vfdm_with_LoRA import FlowDiffusion
 from DM.modules.vfdm_with_gentron import FlowDiffusionGenTron
 from torch.optim.lr_scheduler import MultiStepLR
 
 start = timeit.default_timer()
-BATCH_SIZE = 1
-MAX_EPOCH = 1200
-epoch_milestones = [800, 1000]
+BATCH_SIZE = 4
+MAX_EPOCH = 120
+epoch_milestones = [80, 100]
 root_dir = 'log'
-data_dir = "datasets/UTD-MHAD/crop_image_128"
-GPU = "0"
+data_dir = "/kaggle/input/mhad-mini/crop_image_mini"
+GPU = "0,1"
 postfix = "-joint-steplr-random-onlyflow-train-regionmm"  # sl: step-lr, rmm:regionmm
 joint = "joint" in postfix or "-j" in postfix  # allow joint training with unconditional model
 frame_sampling = "random" if "random" in postfix else "uniform"  # frame sampling strategy
@@ -38,7 +39,7 @@ split_train_test = "train" in postfix or "-tr" in postfix
 use_residual_flow = "-rf" in postfix
 config_pth = "config/mhad128.yaml"
 # put your pretrained LFAE here
-AE_RESTORE_FROM = "log/mhad128/snapshots/RegionMM.pth"
+AE_RESTORE_FROM = "/kaggle/input/checkpoints-mhad-clfdm/RegionMM.pth"
 INPUT_SIZE = 128
 N_FRAMES = 40
 LEARNING_RATE = 2e-4
@@ -56,7 +57,7 @@ MAX_ITER = max(NUM_EXAMPLES_PER_EPOCH * MAX_EPOCH + 1,
 SAVE_MODEL_EVERY = NUM_STEPS_PER_EPOCH * (MAX_EPOCH // 3)
 SAVE_VID_EVERY = 1000
 SAMPLE_VID_EVERY = 2000
-UPDATE_MODEL_EVERY = 3000
+UPDATE_MODEL_EVERY = 1000
 
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(IMGSHOT_DIR, exist_ok=True)
@@ -190,7 +191,6 @@ def main():
         pretrained_pth=AE_RESTORE_FROM,
         config_pth=config_pth
     )
-
 
     model.cuda()
 
@@ -367,7 +367,7 @@ def main():
                     save_sample_out_img = sample_img(model.sample_out_vid[:, :, nf, :, :])
                     save_sample_warp_img = sample_img(model.sample_warped_vid[:, :, nf, :, :])
                     save_real_grid = grid2fig(
-                        model.real_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
+                        model.module.real_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
                         grid_size=32, img_size=msk_size)
                     save_fake_grid = grid2fig(
                         model.sample_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),

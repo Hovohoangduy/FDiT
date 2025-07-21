@@ -16,9 +16,7 @@ from misc import Logger, grid2fig, conf2fig
 from DM.datasets_mhad import MHAD
 import sys
 import random
-# from DM.modules.video_flow_diffusion_model_multiGPU import FlowDiffusion
-# from DM.modules.vfdm_multiGPU_with_LoRA import FlowDiffusion
-from DM.modules.vfdm_with_gentron import FlowDiffusionGenTron
+from DM.modules.vfdm_multiGPU import FlowDiffusion
 from torch.optim.lr_scheduler import MultiStepLR
 from sync_batchnorm import DataParallelWithCallback
 from DM.modules.text import tokenize, bert_embed
@@ -162,17 +160,17 @@ def main():
     cudnn.benchmark = True
     setup_seed(args.random_seed)
 
-    # model = FlowDiffusion(is_train=True,
-    #                       img_size=INPUT_SIZE // 4,
-    #                       num_frames=N_FRAMES,
-    #                       null_cond_prob=null_cond_prob,
-    #                       sampling_timesteps=200,
-    #                       use_residual_flow=use_residual_flow,
-    #                       learn_null_cond=learn_null_cond,
-    #                       use_deconv=use_deconv,
-    #                       padding_mode=padding_mode,
-    #                       config_pth=config_pth,
-    #                       pretrained_pth=AE_RESTORE_FROM)
+    model = FlowDiffusion(is_train=True,
+                          img_size=INPUT_SIZE // 4,
+                          num_frames=N_FRAMES,
+                          null_cond_prob=null_cond_prob,
+                          sampling_timesteps=200,
+                          use_residual_flow=use_residual_flow,
+                          learn_null_cond=learn_null_cond,
+                          use_deconv=use_deconv,
+                          padding_mode=padding_mode,
+                          config_pth=config_pth,
+                          pretrained_pth=AE_RESTORE_FROM)
     ### LoRA
     # model = FlowDiffusion(
     #     is_train=True,
@@ -187,29 +185,7 @@ def main():
     #     config_pth=config_pth,
     #     pretrained_pth=AE_RESTORE_FROM
     # )
-
-    model = FlowDiffusionGenTron(
-        img_size=INPUT_SIZE//4,
-        num_frames=N_FRAMES,
-        sampling_timesteps=250,
-        null_cond_prob=null_cond_prob,
-        ddim_sampling_eta=1.0,
-        timesteps=1000,
-        dim=64,               # hidden dimension
-        depth=4,              # transformer layers
-        heads=2,              # attention heads
-        dim_head=16,          # head dimension
-        mlp_dim=64*2,         # MLP hidden size
-        lr=LEARNING_RATE,
-        adam_betas=(0.9, 0.99),
-        is_train=True,
-        only_use_flow=only_use_flow,
-        use_residual_flow=use_residual_flow,
-        pretrained_pth=AE_RESTORE_FROM,
-        config_pth=config_pth
-    )
-
-    
+   
     model.cuda()
 
     # Not set model to be train mode! Because pretrained flow autoenc need to be eval (BatchNorm)
