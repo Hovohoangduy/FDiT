@@ -22,8 +22,8 @@ from torch.optim.lr_scheduler import MultiStepLR
 
 start = timeit.default_timer()
 BATCH_SIZE = 4
-MAX_EPOCH = 120
-epoch_milestones = [80, 100]
+MAX_EPOCH = 160
+epoch_milestones = [110, 130]
 root_dir = 'log'
 data_dir = "/kaggle/input/mhad-mini/crop_image_mini"
 GPU = "0,1"
