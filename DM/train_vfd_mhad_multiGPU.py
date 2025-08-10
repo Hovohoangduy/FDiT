@@ -192,21 +192,7 @@ def main():
         pretrained_pth=AE_RESTORE_FROM,
         config_pth=config_pth
     )
-    ### LoRA
-    # model = FlowDiffusion(
-    #     is_train=True,
-    #     img_size=INPUT_SIZE // 4,
-    #     num_frames=N_FRAMES,
-    #     null_cond_prob=null_cond_prob,
-    #     sampling_timesteps=200,
-    #     use_residual_flow=use_residual_flow,
-    #     learn_null_cond=learn_null_cond,
-    #     use_deconv=use_deconv,
-    #     padding_mode=padding_mode,
-    #     config_pth=config_pth,
-    #     pretrained_pth=AE_RESTORE_FROM
-    # )
-   
+
     model.cuda()
 
     # Not set model to be train mode! Because pretrained flow autoenc need to be eval (BatchNorm)
@@ -223,21 +209,23 @@ def main():
             checkpoint = torch.load(args.restore_from)
             if args.set_start:
                 args.start_step = int(math.ceil(checkpoint['example'] / args.batch_size))
-            model_ckpt = model.diffusion.state_dict()
+            model_ckpt = model.diffusion.module.state_dict() if isinstance(model.diffusion, torch.nn.DataParallel) else model.diffusion.state_dict()
             for name, _ in model_ckpt.items():
                 model_ckpt[name].copy_(checkpoint['diffusion'][name])
-            model.diffusion.load_state_dict(model_ckpt)
+            if isinstance(model.diffusion, torch.nn.DataParallel):
+                model.diffusion.module.load_state_dict(model_ckpt)
+            else:
+                model.diffusion.load_state_dict(model_ckpt)
             print("=> loaded checkpoint '{}'".format(args.restore_from))
-            if args.set_start:
-                if "optimizer_diff" in list(checkpoint.keys()):
-                    optimizer_diff.load_state_dict(checkpoint['optimizer_diff'])
+            if args.set_start and ("optimizer_diff" in list(checkpoint.keys())):
+                optimizer_diff.load_state_dict(checkpoint['optimizer_diff'])
         else:
             print("=> no checkpoint found at '{}'".format(args.restore_from))
     else:
         print("NO checkpoint found!")
 
     # enable the usage of multi-GPU
-    model = DataParallelWithCallback(model)
+    model.diffusion = DataParallelWithCallback(model.diffusion)
 
     setup_seed(args.random_seed)
     trainloader = data.DataLoader(MHAD(data_dir=data_dir,
@@ -277,24 +265,28 @@ def main():
             bs = real_vids.size(0)
 
             # encode text
-            cond = bert_embed(tokenize(ref_texts), return_cls_repr=model.module.diffusion.text_use_bert_cls).cuda()
-            train_output_dict = model.forward(real_vid=real_vids, ref_img=ref_imgs, ref_text=cond)
+            cond = bert_embed(tokenize(ref_texts), return_cls_repr=model.diffusion.module.text_use_bert_cls).cuda()
+
+            # call by position, not keywords
+            train_output_dict = model.diffusion(real_vids, ref_imgs, cond)
 
             # optimize model
             optimizer_diff.zero_grad()
+            rec_loss = train_output_dict.get("rec_loss", torch.tensor(0.0, device=ref_imgs.device))
+            rec_warp_loss = train_output_dict.get("rec_warp_loss", torch.tensor(0.0, device=ref_imgs.device))
+            base_loss = train_output_dict["loss"].mean()
             if only_use_flow:
-                train_output_dict["loss"].mean().backward()
+                base_loss.backward()
             else:
-                (train_output_dict["loss"].mean() + train_output_dict["rec_loss"].mean() +
-                 train_output_dict["rec_warp_loss"].mean()).backward()
+                (base_loss + rec_loss.mean() + rec_warp_loss.mean()).backward()
             optimizer_diff.step()
 
             batch_time.update(timeit.default_timer() - iter_end)
             iter_end = timeit.default_timer()
 
-            losses.update(train_output_dict["loss"].mean(), bs)
-            losses_rec.update(train_output_dict["rec_loss"].mean(), bs)
-            losses_warp.update(train_output_dict["rec_warp_loss"].mean(), bs)
+            losses.update(base_loss.detach(), bs)
+            losses_rec.update(rec_loss.detach(), bs)
+            losses_warp.update(rec_warp_loss.detach(), bs)
 
             if actual_step % args.print_freq == 0:
                 print('iter: [{0}]{1}/{2}\t'
@@ -310,8 +302,8 @@ def main():
                     loss_warp=losses_warp,
                 ))
 
-            null_cond_mask = np.array(train_output_dict["null_cond_mask"].data.cpu().numpy(),
-                                      dtype=np.uint8)
+            mask_tensor = train_output_dict.get("null_cond_mask", torch.zeros(bs, device=ref_imgs.device))
+            null_cond_mask = mask_tensor.detach().float().cpu().numpy().astype(np.uint8)
 
             if actual_step % args.save_img_freq == 0:
                 msk_size = ref_imgs.shape[-1]
@@ -386,7 +378,7 @@ def main():
             # sampling
             if actual_step % args.sample_vid_freq == 0 and cnt != 0:
                 print("sampling video...")
-                sample_output_dict = model.module.sample_one_video(sample_img=ref_imgs[0].unsqueeze(dim=0).cuda(),
+                sample_output_dict = model.sample_one_video(sample_img=ref_imgs[0].unsqueeze(dim=0).cuda(),
                                                                    sample_text=[ref_texts[0]],
                                                                    cond_scale=1.0)
                 num_frames = real_vids.size(2)
@@ -429,7 +421,7 @@ def main():
             if actual_step % args.save_pred_every == 0 and cnt != 0:
                 print('taking snapshot ...')
                 torch.save({'example': actual_step * args.batch_size,
-                            'diffusion': model.module.diffusion.state_dict(),
+                            'diffusion': model.diffusion.module.state_dict(),
                             'optimizer_diff': optimizer_diff.state_dict()},
                            osp.join(args.snapshot_dir,
                                     'flowdiff_' + format(args.batch_size, "04d") + '_S' + format(actual_step,
@@ -439,7 +431,7 @@ def main():
             if actual_step % args.update_pred_every == 0 and cnt != 0:
                 print('updating saved snapshot ...')
                 torch.save({'example': actual_step * args.batch_size,
-                            'diffusion': model.module.diffusion.state_dict(),
+                            'diffusion': model.diffusion.module.state_dict(),
                             'optimizer_diff': optimizer_diff.state_dict()},
                            osp.join(args.snapshot_dir, 'flowdiff.pth'))
 
@@ -454,7 +446,7 @@ def main():
 
     print('save the final model ...')
     torch.save({'example': actual_step * args.batch_size,
-                'diffusion': model.module.diffusion.state_dict(),
+                'diffusion': model.diffusion.module.state_dict(),
                 'optimizer_diff': optimizer_diff.state_dict()},
                osp.join(args.snapshot_dir,
                         'flowdiff_' + format(args.batch_size, "04d") + '_S' + format(actual_step, "06d") + '.pth'))
@@ -475,8 +467,10 @@ class AverageMeter(object):
         self.count = 0
 
     def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
+        # accept tensors or floats
+        v = val.item() if isinstance(val, torch.Tensor) else float(val)
+        self.val = v
+        self.sum += v * n
         self.count += n
         self.avg = self.sum / self.count
 
@@ -491,3 +485,4 @@ def setup_seed(seed):
 
 if __name__ == '__main__':
     main()
+    
