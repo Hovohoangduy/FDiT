@@ -227,3 +227,58 @@ class FlowDiffusionGenTron(nn.Module):
         w = torch.linspace(-1,1,W,device='cuda')
         g = torch.stack(torch.meshgrid(h, w), -1).flip(2)
         return g.unsqueeze(0).unsqueeze(2).repeat(B,1,F,1,1).permute(0,3,2,1,4)
+    
+    def sample_one_video(self, cond_scale):
+        self.sample_img_fea = self.generator.compute_fea(self.sample_img)
+        # if cond_scale = 1.0, not using unconditional model
+        pred = self.diffusion.sample(self.sample_img_fea, cond=self.sample_text,
+                                     batch_size=1, cond_scale=cond_scale)
+        if self.use_residual_flow:
+            b, _, nf, h, w = pred[:, :2, :, :, :].size()
+            identity_grid = self.get_grid(b, nf, h, w, normalize=True).cuda()
+            self.sample_vid_grid = pred[:, :2, :, :, :] + identity_grid
+        else:
+            self.sample_vid_grid = pred[:, :2, :, :, :]
+        self.sample_vid_conf = (pred[:, 2, :, :, :].unsqueeze(dim=1) + 1) * 0.5
+        nf = self.sample_vid_grid.size(2)
+        with torch.no_grad():
+            sample_out_img_list = []
+            sample_warped_img_list = []
+            for idx in range(nf):
+                sample_grid = self.sample_vid_grid[:, :, idx, :, :].permute(0, 2, 3, 1)
+                sample_conf = self.sample_vid_conf[:, :, idx, :, :]
+                # predict fake out image and fake warped image
+                generated = self.generator.forward_with_flow(source_image=self.sample_img,
+                                                             optical_flow=sample_grid,
+                                                             occlusion_map=sample_conf)
+                sample_out_img_list.append(generated["prediction"])
+                sample_warped_img_list.append(generated["deformed"])
+        self.sample_out_vid = torch.stack(sample_out_img_list, dim=2)
+        self.sample_warped_vid = torch.stack(sample_warped_img_list, dim=2)
+
+    def set_train_input(self, ref_img, real_vid, ref_text):
+        self.ref_img = ref_img.cuda()
+        self.real_vid = real_vid.cuda()
+        self.ref_text = ref_text
+
+    def set_sample_input(self, sample_img, sample_text):
+        self.sample_img = sample_img.cuda()
+        self.sample_text = sample_text
+
+    def print_learning_rate(self):
+        lr = self.optimizer_diff.param_groups[0]['lr']
+        assert lr > 0
+        print('lr= %.7f' % lr)
+
+    def set_requires_grad(self, nets, requires_grad=False):
+        """Set requies_grad=Fasle for all the networks to avoid unnecessary computations
+        Parameters:
+            nets (network list)   -- a list of networks
+            requires_grad (bool)  -- whether the networks require gradients or not
+        """
+        if not isinstance(nets, list):
+            nets = [nets]
+        for net in nets:
+            if net is not None:
+                for param in net.parameters():
+                    param.requires_grad = requires_grad

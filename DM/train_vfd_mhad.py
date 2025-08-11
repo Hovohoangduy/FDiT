@@ -158,19 +158,6 @@ def main():
     #                       config_pth=config_pth,
     #                       pretrained_pth=AE_RESTORE_FROM)
 
-    # model = FlowDiffusion(
-    #     lr=LEARNING_RATE,
-    #     is_train=True,
-    #     img_size=INPUT_SIZE // 4,
-    #     num_frames=N_FRAMES,
-    #     null_cond_prob=null_cond_prob,
-    #     sampling_timesteps=1000,
-    #     only_use_flow=only_use_flow,
-    #     use_residual_flow=use_residual_flow,
-    #     config_pth=config_pth,
-    #     pretrained_pth=AE_RESTORE_FROM
-    # )
-
     model = FlowDiffusionGenTron(
         img_size=INPUT_SIZE//4,
         num_frames=N_FRAMES,
@@ -282,73 +269,73 @@ def main():
             null_cond_mask = np.array(model.diffusion.denoise_fn.null_cond_mask.data.cpu().numpy(),
                                       dtype=np.uint8)
 
-            if actual_step % args.save_img_freq == 0:
-                msk_size = ref_imgs.shape[-1]
-                save_src_img = sample_img(ref_imgs)
-                save_tar_img = sample_img(real_vids[:, :, N_FRAMES//2, :, :])
-                save_real_out_img = sample_img(model.real_out_vid[:, :, N_FRAMES//2, :, :])
-                save_real_warp_img = sample_img(model.real_warped_vid[:, :, N_FRAMES//2, :, :])
-                save_fake_out_img = sample_img(model.fake_out_vid[:, :, N_FRAMES//2, :, :])
-                save_fake_warp_img = sample_img(model.fake_warped_vid[:, :, N_FRAMES//2, :, :])
-                save_real_grid = grid2fig(model.real_vid_grid[0, :, N_FRAMES//2].permute((1, 2, 0)).data.cpu().numpy(),
-                                          grid_size=32, img_size=msk_size)
-                save_fake_grid = grid2fig(model.fake_vid_grid[0, :, N_FRAMES//2].permute((1, 2, 0)).data.cpu().numpy(),
-                                          grid_size=32, img_size=msk_size)
-                save_real_conf = conf2fig(model.real_vid_conf[0, :, N_FRAMES//2])
-                save_fake_conf = conf2fig(model.fake_vid_conf[0, :, N_FRAMES//2])
-                new_im = Image.new('RGB', (msk_size * 5, msk_size * 2))
-                new_im.paste(Image.fromarray(save_src_img, 'RGB'), (0, 0))
-                new_im.paste(Image.fromarray(save_tar_img, 'RGB'), (0, msk_size))
-                new_im.paste(Image.fromarray(save_real_out_img, 'RGB'), (msk_size, 0))
-                new_im.paste(Image.fromarray(save_real_warp_img, 'RGB'), (msk_size, msk_size))
-                new_im.paste(Image.fromarray(save_fake_out_img, 'RGB'), (msk_size * 2, 0))
-                new_im.paste(Image.fromarray(save_fake_warp_img, 'RGB'), (msk_size * 2, msk_size))
-                new_im.paste(Image.fromarray(save_real_grid, 'RGB'), (msk_size * 3, 0))
-                new_im.paste(Image.fromarray(save_fake_grid, 'RGB'), (msk_size * 3, msk_size))
-                new_im.paste(Image.fromarray(save_real_conf, 'L'), (msk_size * 4, 0))
-                new_im.paste(Image.fromarray(save_fake_conf, 'L'), (msk_size * 4, msk_size))
-                new_im_name = 'B' + format(args.batch_size, "04d") + '_S' + format(actual_step, "06d") \
-                              + '_' + real_names[0] + "_%d.png" % (null_cond_mask[0])
-                new_im_file = os.path.join(args.img_dir, new_im_name)
-                new_im.save(new_im_file)
+            # if actual_step % args.save_img_freq == 0:
+            #     msk_size = ref_imgs.shape[-1]
+            #     save_src_img = sample_img(ref_imgs)
+            #     save_tar_img = sample_img(real_vids[:, :, N_FRAMES//2, :, :])
+            #     save_real_out_img = sample_img(model.real_out_vid[:, :, N_FRAMES//2, :, :])
+            #     save_real_warp_img = sample_img(model.real_warped_vid[:, :, N_FRAMES//2, :, :])
+            #     save_fake_out_img = sample_img(model.fake_out_vid[:, :, N_FRAMES//2, :, :])
+            #     save_fake_warp_img = sample_img(model.fake_warped_vid[:, :, N_FRAMES//2, :, :])
+            #     save_real_grid = grid2fig(model.real_vid_grid[0, :, N_FRAMES//2].permute((1, 2, 0)).data.cpu().numpy(),
+            #                               grid_size=32, img_size=msk_size)
+            #     save_fake_grid = grid2fig(model.fake_vid_grid[0, :, N_FRAMES//2].permute((1, 2, 0)).data.cpu().numpy(),
+            #                               grid_size=32, img_size=msk_size)
+            #     save_real_conf = conf2fig(model.real_vid_conf[0, :, N_FRAMES//2])
+            #     save_fake_conf = conf2fig(model.fake_vid_conf[0, :, N_FRAMES//2])
+            #     new_im = Image.new('RGB', (msk_size * 5, msk_size * 2))
+            #     new_im.paste(Image.fromarray(save_src_img, 'RGB'), (0, 0))
+            #     new_im.paste(Image.fromarray(save_tar_img, 'RGB'), (0, msk_size))
+            #     new_im.paste(Image.fromarray(save_real_out_img, 'RGB'), (msk_size, 0))
+            #     new_im.paste(Image.fromarray(save_real_warp_img, 'RGB'), (msk_size, msk_size))
+            #     new_im.paste(Image.fromarray(save_fake_out_img, 'RGB'), (msk_size * 2, 0))
+            #     new_im.paste(Image.fromarray(save_fake_warp_img, 'RGB'), (msk_size * 2, msk_size))
+            #     new_im.paste(Image.fromarray(save_real_grid, 'RGB'), (msk_size * 3, 0))
+            #     new_im.paste(Image.fromarray(save_fake_grid, 'RGB'), (msk_size * 3, msk_size))
+            #     new_im.paste(Image.fromarray(save_real_conf, 'L'), (msk_size * 4, 0))
+            #     new_im.paste(Image.fromarray(save_fake_conf, 'L'), (msk_size * 4, msk_size))
+            #     new_im_name = 'B' + format(args.batch_size, "04d") + '_S' + format(actual_step, "06d") \
+            #                   + '_' + real_names[0] + "_%d.png" % (null_cond_mask[0])
+            #     new_im_file = os.path.join(args.img_dir, new_im_name)
+            #     new_im.save(new_im_file)
 
-            if actual_step % args.save_vid_freq == 0 and cnt != 0:
-                print("saving video...")
-                num_frames = real_vids.size(2)
-                msk_size = ref_imgs.shape[-1]
-                new_im_arr_list = []
-                save_src_img = sample_img(ref_imgs)
-                for nf in range(num_frames):
-                    save_tar_img = sample_img(real_vids[:, :, nf, :, :])
-                    save_real_out_img = sample_img(model.real_out_vid[:, :, nf, :, :])
-                    save_real_warp_img = sample_img(model.real_warped_vid[:, :, nf, :, :])
-                    save_fake_out_img = sample_img(model.fake_out_vid[:, :, nf, :, :])
-                    save_fake_warp_img = sample_img(model.fake_warped_vid[:, :, nf, :, :])
-                    save_real_grid = grid2fig(
-                        model.real_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
-                        grid_size=32, img_size=msk_size)
-                    save_fake_grid = grid2fig(
-                        model.fake_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
-                        grid_size=32, img_size=msk_size)
-                    save_real_conf = conf2fig(model.real_vid_conf[0, :, nf])
-                    save_fake_conf = conf2fig(model.fake_vid_conf[0, :, nf])
-                    new_im = Image.new('RGB', (msk_size * 5, msk_size * 2))
-                    new_im.paste(Image.fromarray(save_src_img, 'RGB'), (0, 0))
-                    new_im.paste(Image.fromarray(save_tar_img, 'RGB'), (0, msk_size))
-                    new_im.paste(Image.fromarray(save_real_out_img, 'RGB'), (msk_size, 0))
-                    new_im.paste(Image.fromarray(save_real_warp_img, 'RGB'), (msk_size, msk_size))
-                    new_im.paste(Image.fromarray(save_fake_out_img, 'RGB'), (msk_size * 2, 0))
-                    new_im.paste(Image.fromarray(save_fake_warp_img, 'RGB'), (msk_size * 2, msk_size))
-                    new_im.paste(Image.fromarray(save_real_grid, 'RGB'), (msk_size * 3, 0))
-                    new_im.paste(Image.fromarray(save_fake_grid, 'RGB'), (msk_size * 3, msk_size))
-                    new_im.paste(Image.fromarray(save_real_conf, 'L'), (msk_size * 4, 0))
-                    new_im.paste(Image.fromarray(save_fake_conf, 'L'), (msk_size * 4, msk_size))
-                    new_im_arr = np.array(new_im)
-                    new_im_arr_list.append(new_im_arr)
-                new_vid_name = 'B' + format(args.batch_size, "04d") + '_S' + format(actual_step, "06d") \
-                                + '_' + real_names[0] + "_%d.gif" % (null_cond_mask[0])
-                new_vid_file = os.path.join(VIDSHOT_DIR, new_vid_name)
-                imageio.mimsave(new_vid_file, new_im_arr_list)
+            # if actual_step % args.save_vid_freq == 0 and cnt != 0:
+            #     print("saving video...")
+            #     num_frames = real_vids.size(2)
+            #     msk_size = ref_imgs.shape[-1]
+            #     new_im_arr_list = []
+            #     save_src_img = sample_img(ref_imgs)
+            #     for nf in range(num_frames):
+            #         save_tar_img = sample_img(real_vids[:, :, nf, :, :])
+            #         save_real_out_img = sample_img(model.real_out_vid[:, :, nf, :, :])
+            #         save_real_warp_img = sample_img(model.real_warped_vid[:, :, nf, :, :])
+            #         save_fake_out_img = sample_img(model.fake_out_vid[:, :, nf, :, :])
+            #         save_fake_warp_img = sample_img(model.fake_warped_vid[:, :, nf, :, :])
+            #         save_real_grid = grid2fig(
+            #             model.real_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
+            #             grid_size=32, img_size=msk_size)
+            #         save_fake_grid = grid2fig(
+            #             model.fake_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
+            #             grid_size=32, img_size=msk_size)
+            #         save_real_conf = conf2fig(model.real_vid_conf[0, :, nf])
+            #         save_fake_conf = conf2fig(model.fake_vid_conf[0, :, nf])
+            #         new_im = Image.new('RGB', (msk_size * 5, msk_size * 2))
+            #         new_im.paste(Image.fromarray(save_src_img, 'RGB'), (0, 0))
+            #         new_im.paste(Image.fromarray(save_tar_img, 'RGB'), (0, msk_size))
+            #         new_im.paste(Image.fromarray(save_real_out_img, 'RGB'), (msk_size, 0))
+            #         new_im.paste(Image.fromarray(save_real_warp_img, 'RGB'), (msk_size, msk_size))
+            #         new_im.paste(Image.fromarray(save_fake_out_img, 'RGB'), (msk_size * 2, 0))
+            #         new_im.paste(Image.fromarray(save_fake_warp_img, 'RGB'), (msk_size * 2, msk_size))
+            #         new_im.paste(Image.fromarray(save_real_grid, 'RGB'), (msk_size * 3, 0))
+            #         new_im.paste(Image.fromarray(save_fake_grid, 'RGB'), (msk_size * 3, msk_size))
+            #         new_im.paste(Image.fromarray(save_real_conf, 'L'), (msk_size * 4, 0))
+            #         new_im.paste(Image.fromarray(save_fake_conf, 'L'), (msk_size * 4, msk_size))
+            #         new_im_arr = np.array(new_im)
+            #         new_im_arr_list.append(new_im_arr)
+            #     new_vid_name = 'B' + format(args.batch_size, "04d") + '_S' + format(actual_step, "06d") \
+            #                     + '_' + real_names[0] + "_%d.gif" % (null_cond_mask[0])
+            #     new_vid_file = os.path.join(VIDSHOT_DIR, new_vid_name)
+            #     imageio.mimsave(new_vid_file, new_im_arr_list)
 
             # # sampling
             # if actual_step % args.sample_vid_freq == 0 and cnt != 0:
