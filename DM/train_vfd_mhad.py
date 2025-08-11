@@ -22,8 +22,8 @@ from torch.optim.lr_scheduler import MultiStepLR
 
 start = timeit.default_timer()
 BATCH_SIZE = 4
-MAX_EPOCH = 160
-epoch_milestones = [110, 130]
+MAX_EPOCH = 2000
+epoch_milestones = [1100, 1400]
 root_dir = 'log'
 data_dir = "/kaggle/input/mhad-mini/crop_image_mini"
 GPU = "0,1"
@@ -350,54 +350,57 @@ def main():
                 new_vid_file = os.path.join(VIDSHOT_DIR, new_vid_name)
                 imageio.mimsave(new_vid_file, new_im_arr_list)
 
-            # sampling
-            if actual_step % args.sample_vid_freq == 0 and cnt != 0:
-                print("sampling video...")
-                model.set_sample_input(sample_img=ref_imgs[0].unsqueeze(dim=0),
-                                       sample_text=[ref_texts[0]])
-                model.sample_one_video(cond_scale=1.0)
-                num_frames = real_vids.size(2)
-                msk_size = ref_imgs.shape[-1]
-                new_im_arr_list = []
-                save_src_img = sample_img(ref_imgs)
-                for nf in range(num_frames):
-                    save_tar_img = sample_img(real_vids[:, :, nf, :, :])
-                    save_real_out_img = sample_img(model.real_out_vid[:, :, nf, :, :])
-                    save_real_warp_img = sample_img(model.real_warped_vid[:, :, nf, :, :])
-                    save_sample_out_img = sample_img(model.sample_out_vid[:, :, nf, :, :])
-                    save_sample_warp_img = sample_img(model.sample_warped_vid[:, :, nf, :, :])
-                    save_real_grid = grid2fig(
-                        model.module.real_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
-                        grid_size=32, img_size=msk_size)
-                    save_fake_grid = grid2fig(
-                        model.sample_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
-                        grid_size=32, img_size=msk_size)
-                    save_real_conf = conf2fig(model.real_vid_conf[0, :, nf])
-                    save_fake_conf = conf2fig(model.fake_vid_conf[0, :, nf])
-                    new_im = Image.new('RGB', (msk_size * 5, msk_size * 2))
-                    new_im.paste(Image.fromarray(save_src_img, 'RGB'), (0, 0))
-                    new_im.paste(Image.fromarray(save_tar_img, 'RGB'), (0, msk_size))
-                    new_im.paste(Image.fromarray(save_real_out_img, 'RGB'), (msk_size, 0))
-                    new_im.paste(Image.fromarray(save_real_warp_img, 'RGB'), (msk_size, msk_size))
-                    new_im.paste(Image.fromarray(save_sample_out_img, 'RGB'), (msk_size * 2, 0))
-                    new_im.paste(Image.fromarray(save_sample_warp_img, 'RGB'), (msk_size * 2, msk_size))
-                    new_im.paste(Image.fromarray(save_real_grid, 'RGB'), (msk_size * 3, 0))
-                    new_im.paste(Image.fromarray(save_fake_grid, 'RGB'), (msk_size * 3, msk_size))
-                    new_im.paste(Image.fromarray(save_real_conf, 'L'), (msk_size * 4, 0))
-                    new_im.paste(Image.fromarray(save_fake_conf, 'L'), (msk_size * 4, msk_size))
-                    new_im_arr = np.array(new_im)
-                    new_im_arr_list.append(new_im_arr)
-                new_vid_name = 'B' + format(args.batch_size, "04d") + '_S' + format(actual_step, "06d") \
-                                + '_' + real_names[0] + ".gif"
-                new_vid_file = os.path.join(SAMPLE_DIR, new_vid_name)
-                imageio.mimsave(new_vid_file, new_im_arr_list)
+            # # sampling
+            # if actual_step % args.sample_vid_freq == 0 and cnt != 0:
+            #     print("sampling video...")
+            #     model.sample_one_video(
+            #         sample_img=ref_imgs[0].unsqueeze(dim=0),
+            #         sample_text=[ref_texts[0]],
+            #         cond_scale=1.0
+            #     )
+            #     num_frames = real_vids.size(2)
+            #     msk_size = ref_imgs.shape[-1]
+            #     new_im_arr_list = []
+            #     save_src_img = sample_img(ref_imgs)
+            #     for nf in range(num_frames):
+            #         save_tar_img = sample_img(real_vids[:, :, nf, :, :])
+            #         save_real_out_img = sample_img(model.real_out_vid[:, :, nf, :, :])
+            #         save_real_warp_img = sample_img(model.real_warped_vid[:, :, nf, :, :])
+            #         save_sample_out_img = sample_img(model.sample_out_vid[:, :, nf, :, :])
+            #         save_sample_warp_img = sample_img(model.sample_warped_vid[:, :, nf, :, :])
+            #         save_real_grid = grid2fig(
+            #             model.real_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
+            #             grid_size=32, img_size=msk_size)
+            #         save_fake_grid = grid2fig(
+            #             model.sample_vid_grid[0, :, nf].permute((1, 2, 0)).data.cpu().numpy(),
+            #             grid_size=32, img_size=msk_size)
+            #         save_real_conf = conf2fig(model.real_vid_conf[0, :, nf])
+            #         # dùng sample_vid_conf cho phần sampling
+            #         save_fake_conf = conf2fig(model.sample_vid_conf[0, :, nf])
+            #         new_im = Image.new('RGB', (msk_size * 5, msk_size * 2))
+            #         new_im.paste(Image.fromarray(save_src_img, 'RGB'), (0, 0))
+            #         new_im.paste(Image.fromarray(save_tar_img, 'RGB'), (0, msk_size))
+            #         new_im.paste(Image.fromarray(save_real_out_img, 'RGB'), (msk_size, 0))
+            #         new_im.paste(Image.fromarray(save_real_warp_img, 'RGB'), (msk_size, msk_size))
+            #         new_im.paste(Image.fromarray(save_sample_out_img, 'RGB'), (msk_size * 2, 0))
+            #         new_im.paste(Image.fromarray(save_sample_warp_img, 'RGB'), (msk_size * 2, msk_size))
+            #         new_im.paste(Image.fromarray(save_real_grid, 'RGB'), (msk_size * 3, 0))
+            #         new_im.paste(Image.fromarray(save_fake_grid, 'RGB'), (msk_size * 3, msk_size))
+            #         new_im.paste(Image.fromarray(save_real_conf, 'L'), (msk_size * 4, 0))
+            #         new_im.paste(Image.fromarray(save_fake_conf, 'L'), (msk_size * 4, msk_size))
+            #         new_im_arr = np.array(new_im)
+            #         new_im_arr_list.append(new_im_arr)
+            #     new_vid_name = 'B' + format(args.batch_size, "04d") + '_S' + format(actual_step, "06d") \
+            #                     + '_' + real_names[0] + ".gif"
+            #     new_vid_file = os.path.join(SAMPLE_DIR, new_vid_name)
+            #     imageio.mimsave(new_vid_file, new_im_arr_list)
 
             # save model at i-th step
             if actual_step % args.save_pred_every == 0 and cnt != 0:
                 print('taking snapshot ...')
                 torch.save({'example': actual_step * args.batch_size,
                             'diffusion': model.diffusion.state_dict(),
-                            'optimizer_diff': model.optimizer_diff.state_dict()},
+                            'optimizer_diff': model.optimizer_diff.state_dict()                        },
                            osp.join(args.snapshot_dir,
                                     'flowdiff_' + format(args.batch_size, "04d") + '_S' + format(actual_step, "06d") + '.pth'))
 
@@ -457,4 +460,3 @@ def setup_seed(seed):
 
 if __name__ == '__main__':
     main()
-
