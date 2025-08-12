@@ -22,8 +22,8 @@ from torch.optim.lr_scheduler import MultiStepLR
 
 start = timeit.default_timer()
 BATCH_SIZE = 4
-MAX_EPOCH = 2000
-epoch_milestones = [1100, 1400]
+MAX_EPOCH = 1000
+epoch_milestones = [600, 800]
 root_dir = 'log'
 data_dir = "/kaggle/input/mhad-mini/crop_image_mini"
 GPU = "0,1"
@@ -253,8 +253,11 @@ def main():
             losses_warp.update(model.rec_warp_loss, bs)
 
             if actual_step % args.print_freq == 0:
-                print('iter: [{0}]{1}/{2}\t'
-                      'loss {loss.val:.7f} ({loss.avg:.7f})\t'
+                # print('iter: [{0}]{1}/{2}\t'
+                #       'loss {loss.val:.7f} ({loss.avg:.7f})\t'
+                #       'loss_rec {loss_rec.val:.4f} ({loss_rec.avg:.4f})\t'
+                #       'loss_warp {loss_warp.val:.4f} ({loss_warp.avg:.4f})'
+                print('loss {loss.val:.7f} ({loss.avg:.7f})\t'
                       'loss_rec {loss_rec.val:.4f} ({loss_rec.avg:.4f})\t'
                       'loss_warp {loss_warp.val:.4f} ({loss_warp.avg:.4f})'
                     .format(
