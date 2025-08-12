@@ -50,7 +50,7 @@ SNAPSHOT_DIR = os.path.join(root_dir, 'snapshots'+postfix)
 IMGSHOT_DIR = os.path.join(root_dir, 'imgshots'+postfix)
 VIDSHOT_DIR = os.path.join(root_dir, "vidshots"+postfix)
 SAMPLE_DIR = os.path.join(root_dir, 'sample'+postfix)
-NUM_EXAMPLES_PER_EPOCH = 431
+NUM_EXAMPLES_PER_EPOCH = 80
 NUM_STEPS_PER_EPOCH = math.ceil(NUM_EXAMPLES_PER_EPOCH / float(BATCH_SIZE))
 MAX_ITER = max(NUM_EXAMPLES_PER_EPOCH * MAX_EPOCH + 1,
                NUM_STEPS_PER_EPOCH * BATCH_SIZE * MAX_EPOCH + 1)
@@ -253,11 +253,8 @@ def main():
             losses_warp.update(model.rec_warp_loss, bs)
 
             if actual_step % args.print_freq == 0:
-                # print('iter: [{0}]{1}/{2}\t'
-                #       'loss {loss.val:.7f} ({loss.avg:.7f})\t'
-                #       'loss_rec {loss_rec.val:.4f} ({loss_rec.avg:.4f})\t'
-                #       'loss_warp {loss_warp.val:.4f} ({loss_warp.avg:.4f})'
-                print('loss {loss.val:.7f} ({loss.avg:.7f})\t'
+                print('iter: [{0}]{1}/{2}\t'
+                      'loss {loss.val:.7f} ({loss.avg:.7f})\t'
                       'loss_rec {loss_rec.val:.4f} ({loss_rec.avg:.4f})\t'
                       'loss_warp {loss_warp.val:.4f} ({loss_warp.avg:.4f})'
                     .format(
