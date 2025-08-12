@@ -16,13 +16,22 @@ BERT_MODEL_DIM = 768
 def get_tokenizer():
     global TOKENIZER
     if TOKENIZER is None:
-        TOKENIZER = AutoTokenizer.from_pretrained("bert-base-uncased")
+        # TOKENIZER = AutoTokenizer.from_pretrained("bert-base-uncased")
+        ### GPT NEO and pad token
+        TOKENIZER = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-125m")
+        if TOKENIZER.pad_token is None:
+            TOKENIZER.pad_token = TOKENIZER.eos_token
     return TOKENIZER
 
 def get_bert():
     global MODEL
     if MODEL is None:
-        MODEL = AutoModel.from_pretrained("bert-base-uncased")
+        # MODEL = AutoModel.from_pretrained("bert-base-uncased")
+        ### GPT NEO and pad token
+        MODEL = AutoModel.from_pretrained("EleutherAI/gpt-neo-125m")
+        tok = get_tokenizer()
+        MODEL.config.pad_token_id = tok.pad_token_id
+
         if torch.cuda.is_available():
             MODEL = MODEL.cuda()
     return MODEL
