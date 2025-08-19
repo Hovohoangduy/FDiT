@@ -249,7 +249,7 @@ class FlowDiffusion(nn.Module):
 
 
 if __name__ == "__main__":
-    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     bs = 5
     img_size = 64
     num_frames = 40
@@ -259,7 +259,7 @@ if __name__ == "__main__":
     model = FlowDiffusion(use_residual_flow=False,
                           sampling_timesteps=10,
                           img_size=16,
-                          config_pth="/workspace/code/CVPR23_LFDM/config/mug128.yaml",
+                          config_pth="config/mhad128.yaml",
                           pretrained_pth="")
     model.cuda()
     # model.train()

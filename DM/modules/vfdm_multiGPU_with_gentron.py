@@ -20,44 +20,109 @@ class SinusoidalPosEmb(nn.Module):
         args = x[:, None] * freqs[None]
         return torch.cat([args.sin(), args.cos()], dim=-1)
 
-# Transformer denoiser
+def modulate(x, shift, scale):
+    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+
+class LinformerAttention(nn.Module):
+    def __init__(self, seq_len, dim, n_heads, k):
+        super().__init__()
+        self.n_heads = n_heads
+        self.scale = (dim // n_heads) ** -0.5
+        self.qw = nn.Linear(dim, dim)
+        self.kw = nn.Linear(dim, dim)
+        self.vw = nn.Linear(dim, dim)
+        self.E = nn.Parameter(torch.randn(seq_len, k))
+        self.F = nn.Parameter(torch.randn(seq_len, k))
+        self.ow = nn.Linear(dim, dim)
+
+    def forward(self, x):
+        q = self.qw(x)
+        k = self.kw(x)
+        v = self.vw(x)
+        B, L, D = q.shape
+        q = q.view(B, L, self.n_heads, -1).transpose(1, 2)
+        k = k.view(B, L, self.n_heads, -1).transpose(1, 2).transpose(-1, -2)
+        v = v.view(B, L, self.n_heads, -1).transpose(1, 2).transpose(-1, -2)
+        attn = torch.softmax(torch.matmul(q, k) * self.scale, dim=-1)
+        out = torch.matmul(attn, v).transpose(1, 2).contiguous().view(B, L, D)
+        return self.ow(out)
+    
+class TransformerBlock(nn.Module):
+    def __init__(self, seq_len, dim, heads, mlp_dim, k):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(dim)
+        self.attn = LinformerAttention(seq_len, dim, heads, k)
+        self.ln2 = nn.LayerNorm(dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, mlp_dim),
+            nn.GELU(),
+            nn.Linear(mlp_dim, dim)
+        )
+        self.gamma_1 = nn.Linear(dim, dim)
+        self.beta_1 = nn.Linear(dim, dim)
+        self.gamma_2 = nn.Linear(dim, dim)
+        self.beta_2 = nn.Linear(dim, dim)
+        self.scale_1 = nn.Linear(dim, dim)
+        self.scale_2 = nn.Linear(dim, dim)
+        self._init_weights([self.gamma_1, self.beta_1, self.gamma_2, self.beta_2, self.scale_1, self.scale_2])
+
+    def _init_weights(self, layers):
+        for layer in layers:
+            nn.init.zeros_(layer.weight)
+            nn.init.zeros_(layer.bias)
+
+    def forward(self, x, c):
+        scale_msa = self.gamma_1(c)
+        shift_msa = self.beta_1(c)
+        scale_mlp = self.gamma_2(c)
+        shift_mlp = self.beta_2(c)
+        gate_msa = self.scale_1(c).unsqueeze(1)
+        gate_mlp = self.scale_2(c).unsqueeze(2)
+
+        x = self.attn(modulate(self.ln1(x), shift_msa, scale_msa)) * gate_msa + x
+        x = self.mlp(modulate(self.ln2(x), shift_mlp, scale_mlp)) * gate_mlp + x
+        return x
+
 class DiffusionTransformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, time_emb_dim, out_channels):
+    def __init__(self, dim, depth, heads, mlp_dim, time_emb_dim, out_channels, seq_k=64):
         super().__init__()
         self.dim = dim
         self.out_channels = out_channels
-        self.kernel, self.padding = (1,7,7), (0,3,3)
+        self.kernel, self.padding = (1, 7, 7), (0, 3, 3)
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(time_emb_dim),
             nn.Linear(time_emb_dim, dim)
         )
         self.to_patch = None
         self.to_out = nn.Conv3d(dim, out_channels, 1)
-        self.blocks = nn.ModuleList([
-            nn.ModuleDict({
-                'norm1': nn.LayerNorm(dim),
-                'attn': nn.MultiheadAttention(dim, heads, batch_first=True),
-                'norm2': nn.LayerNorm(dim),
-                'mlp': nn.Sequential(nn.Linear(dim, mlp_dim), nn.GELU(), nn.Linear(mlp_dim, dim))
-            }) for _ in range(depth)
-        ])
+        self.blocks = nn.ModuleList([])
+        self.seq_k = seq_k
         self.temp_attn = nn.MultiheadAttention(dim, heads, batch_first=True)
+
         self.null_cond_mask = torch.tensor([], dtype=torch.bool)
 
-    def forward(self, x, t, *args, **kwargs):
+    def build_blocks(self, seq_len):
+        self.blocks = nn.ModuleList([
+            TransformerBlock(seq_len=seq_len, dim=self.dim, heads=4, mlp_dim=self.dim * 4, k=self.seq_k)
+            for _ in range(3)
+        ])
+
+    def forward(self, x, t):
         B, C, F, H, W = x.shape
         if self.to_patch is None:
             self.to_patch = nn.Conv3d(C, self.dim, self.kernel, padding=self.padding).to(x.device)
         x = self.to_patch(x)
         x = rearrange(x, 'b d f h w -> (b f) (h w) d')
+
         t_emb = self.time_mlp(t)
-        t_emb = repeat(t_emb, 'b d -> (b f) n d', f=F, n=H*W)
-        x = x + t_emb
+        t_emb = repeat(t_emb, 'b d -> (b f) n d', f=F, n=H * W)
+
+        if len(self.blocks) == 0:
+            self.build_blocks(seq_len=H * W)
+
         for blk in self.blocks:
-            h_ = blk['norm1'](x)
-            att, _ = blk['attn'](h_, h_, h_)
-            x = x + att
-            x = x + blk['mlp'](blk['norm2'](x))
+            x = blk(x, t_emb)
+
         x_t = rearrange(x, '(b f) n d -> (n b) f d', b=B, f=F)
         x_t, _ = self.temp_attn(x_t, x_t, x_t)
         x = rearrange(x_t, '(n b) f d -> (b f) n d', b=B, f=F)
