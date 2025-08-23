@@ -1,5 +1,3 @@
-# Full updated code with all fixes: device alignment, FiLM broadcasting, 3D attention input, and minor cleanups
-
 import os
 import math
 import torch
@@ -12,10 +10,6 @@ from LFAE.modules.bg_motion_predictor import BGMotionPredictor
 from LFAE.modules.region_predictor import RegionPredictor
 from DM.modules.vfd import GaussianDiffusion
 
-
-# -----------------------------
-# Utilities
-# -----------------------------
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -29,18 +23,8 @@ class SinusoidalPosEmb(nn.Module):
 
 
 def modulate(x, shift, scale):
-    """
-    x:     [B*, L, D]
-    shift: [B*, D]
-    scale: [B*, D]
-    -> broadcast over L via unsqueeze(1)
-    """
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
-
-# -----------------------------
-# Linformer-style Attention (fixed)
-# -----------------------------
 class LinformerAttention(nn.Module):
     def __init__(self, seq_len, dim, n_heads, k):
         super().__init__()
@@ -50,13 +34,11 @@ class LinformerAttention(nn.Module):
         self.qw = nn.Linear(dim, dim)
         self.kw = nn.Linear(dim, dim)
         self.vw = nn.Linear(dim, dim)
-        # Optional projection matrices (not used explicitly below but kept for future linformer proj)
         self.E = nn.Parameter(torch.randn(seq_len, k))
         self.F = nn.Parameter(torch.randn(seq_len, k))
         self.ow = nn.Linear(dim, dim)
 
     def forward(self, x):
-        # x: [B, L, D]
         if x.dim() != 3:
             raise ValueError(f"Expected 3D input (B, L, D), but got {x.shape}")
 
@@ -68,9 +50,9 @@ class LinformerAttention(nn.Module):
         H = self.n_heads
         Dh = D // H
 
-        q = q.view(B, L, H, Dh).transpose(1, 2)              # [B, H, L, Dh]
+        q = q.view(B, L, H, Dh).transpose(1, 2)                    # [B, H, L, Dh]
         k = k.view(B, L, H, Dh).transpose(1, 2).transpose(-1, -2)  # [B, H, Dh, L]
-        v = v.view(B, L, H, Dh).transpose(1, 2)              # [B, H, L, Dh]
+        v = v.view(B, L, H, Dh).transpose(1, 2)                    # [B, H, L, Dh]
 
         attn = torch.softmax(torch.matmul(q, k) * self.scale, dim=-1)  # [B, H, L, L]
         out = torch.matmul(attn, v)                                    # [B, H, L, Dh]
@@ -89,25 +71,23 @@ class TransformerBlock(nn.Module):
             nn.GELU(),
             nn.Linear(mlp_dim, dim)
         )
-        # FiLM parameters
         self.gamma_1 = nn.Linear(dim, dim)
-        self.beta_1 = nn.Linear(dim, dim)
+        self.beta_1  = nn.Linear(dim, dim)
         self.gamma_2 = nn.Linear(dim, dim)
-        self.beta_2 = nn.Linear(dim, dim)
-        self.scale_1 = nn.Linear(dim, dim)
-        self.scale_2 = nn.Linear(dim, dim)
-        self._init_weights([self.gamma_1, self.beta_1, self.gamma_2, self.beta_2, self.scale_1, self.scale_2])
+        self.beta_2  = nn.Linear(dim, dim)
+        self.scale_1 = nn.Linear(dim, dim)  # gate for attn branch
+        self.scale_2 = nn.Linear(dim, dim)  # gate for mlp branch
+        self._init_weights()
 
-    def _init_weights(self, layers):
-        for layer in layers:
-            nn.init.zeros_(layer.weight)
-            nn.init.zeros_(layer.bias)
+    def _init_weights(self):
+        nn.init.zeros_(self.gamma_1.weight); nn.init.zeros_(self.gamma_1.bias)
+        nn.init.zeros_(self.beta_1.weight);  nn.init.zeros_(self.beta_1.bias)
+        nn.init.zeros_(self.gamma_2.weight); nn.init.zeros_(self.gamma_2.bias)
+        nn.init.zeros_(self.beta_2.weight);  nn.init.zeros_(self.beta_2.bias)
+        nn.init.zeros_(self.scale_1.weight); nn.init.ones_(self.scale_1.bias)
+        nn.init.zeros_(self.scale_2.weight); nn.init.ones_(self.scale_2.bias)
 
     def forward(self, x, c):
-        """
-        x: [B*, L, D]
-        c: [B*, D]  (per-frame conditioning)
-        """
         scale_msa = self.gamma_1(c)  # [B*, D]
         shift_msa = self.beta_1(c)   # [B*, D]
         scale_mlp = self.gamma_2(c)  # [B*, D]
@@ -131,7 +111,7 @@ class DiffusionTransformer(nn.Module):
             SinusoidalPosEmb(time_emb_dim),
             nn.Linear(time_emb_dim, dim)
         )
-        self.to_patch = None
+        self.to_patch = None  # sẽ được gán đúng in_channels ở call-site trước khi optimize
         self.to_out = nn.Conv3d(dim, out_channels, 1)
         self.blocks = nn.ModuleList([])
         self.seq_k = seq_k
@@ -146,53 +126,35 @@ class DiffusionTransformer(nn.Module):
         ])
 
     def forward(self, x, t, cond=None, *args, **kwargs):
-        """
-        x: [B, C, F, H, W]
-        t: [B]
-        cond: unused here (text can be threaded in higher-level diffusion if needed)
-        """
         B, C, F, H, W = x.shape
         device = x.device
-
-        # 3D conv to feature dim
-        if self.to_patch is None:
+        if self.to_patch is None or self.to_patch.in_channels != C:
             self.to_patch = nn.Conv3d(C, self.dim, self.kernel, padding=self.padding).to(device)
 
         x = self.to_patch(x)                            # [B, D, F, H, W]
-        x = rearrange(x, 'b d f h w -> (b f) (h w) d')  # [B*F, L, D]  (L = H*W)
-        assert x.dim() == 3, f"Expected 3D after rearrange, got {x.shape}"
+        x = rearrange(x, 'b d f h w -> (b f) (h w) d')  # [B*F, L, D]
 
         t = t.to(device)
-        self.time_mlp.to(device)
-        self.temp_attn.to(device)
-
-        # Per-frame conditioning c: [B*F, D]
         t_emb = self.time_mlp(t)                        # [B, D]
         c = repeat(t_emb, 'b d -> (b f) d', f=F)        # [B*F, D]
-
-        # Build blocks lazily with correct seq_len
         if len(self.blocks) == 0:
             self.build_blocks(seq_len=H * W)
-            for blk in self.blocks:
-                blk.to(device)
-
-        # Spatial transformer blocks
+            self.blocks.to(device)
         for blk in self.blocks:
-            x = blk(x, c)  # keep 3D [B*F, L, D]
-
-        # Temporal attention: operate across F for each spatial token
+            x = blk(x, c)  # [B*F, L, D]
         x_t = rearrange(x, '(b f) n d -> (n b) f d', b=B, f=F)  # [N*B, F, D]
         x_t, _ = self.temp_attn(x_t, x_t, x_t)                  # [N*B, F, D]
         x = rearrange(x_t, '(n b) f d -> (b f) n d', b=B, f=F)  # [B*F, L, D]
-
-        # Back to 5D and project out
         x = rearrange(x, '(b f) (h w) d -> b d f h w', b=B, f=F, h=H, w=W)
         return self.to_out(x).to(device)
+    
+    def forward_with_cond_scale(self, x, t, cond=None, cond_scale=1.0, **kwargs):
+        if cond is None or cond_scale is None or float(cond_scale) == 1.0:
+            return self.forward(x, t, cond=cond)
+        out_cond = self.forward(x, t, cond=cond)
+        out_uncond = self.forward(x, t, cond=None)
+        return out_uncond + (out_cond - out_uncond) * float(cond_scale)
 
-
-# -----------------------------
-# Diffusion wrapper (GenTron)
-# -----------------------------
 class GaussianDiffusionGenTron(GaussianDiffusion):
     """
     Gaussian diffusion tailored for GenTron, using 2-channel flow inputs.
@@ -211,7 +173,6 @@ class GaussianDiffusionGenTron(GaussianDiffusion):
         loss_type='l2',
         use_dynamic_thres=True
     ):
-        # explicitly set channels=2 for flow (u,v)
         super().__init__(
             denoise_fn,
             image_size=image_size,
@@ -225,10 +186,6 @@ class GaussianDiffusionGenTron(GaussianDiffusion):
             null_cond_prob=null_cond_prob
         )
 
-
-# -----------------------------
-# Main model
-# -----------------------------
 class FlowDiffusionGenTron(nn.Module):
     def __init__(self, img_size, num_frames, sampling_timesteps, null_cond_prob,
                  ddim_sampling_eta, timesteps, dim, depth, heads, dim_head,
@@ -240,7 +197,7 @@ class FlowDiffusionGenTron(nn.Module):
         cfg = yaml.safe_load(open(config_pth))
         ckpt = torch.load(pretrained_pth) if pretrained_pth else None
 
-        # ----- LFAE components -----
+        # ----- LFAE components (frozen) -----
         self.generator = Generator(
             num_regions=cfg['model_params']['num_regions'],
             num_channels=cfg['model_params']['num_channels'],
@@ -259,11 +216,14 @@ class FlowDiffusionGenTron(nn.Module):
         ).cuda()
 
         if ckpt:
-            self.generator.load_state_dict(ckpt['generator']); self.generator.eval(); self.generator.requires_grad_(False)
-            self.region_predictor.load_state_dict(ckpt['region_predictor']); self.region_predictor.eval(); self.region_predictor.requires_grad_(False)
-            self.bg_predictor.load_state_dict(ckpt['bg_predictor']); self.bg_predictor.eval(); self.bg_predictor.requires_grad_(False)
+            self.generator.load_state_dict(ckpt['generator']); self.generator.eval(); self.set_requires_grad(self.generator, False)
+            self.region_predictor.load_state_dict(ckpt['region_predictor']); self.region_predictor.eval(); self.set_requires_grad(self.region_predictor, False)
+            self.bg_predictor.load_state_dict(ckpt['bg_predictor']); self.bg_predictor.eval(); self.set_requires_grad(self.bg_predictor, False)
+        else:
+            self.generator.eval(); self.set_requires_grad(self.generator, False)
+            self.region_predictor.eval(); self.set_requires_grad(self.region_predictor, False)
+            self.bg_predictor.eval(); self.set_requires_grad(self.bg_predictor, False)
 
-        # ----- Denoiser + Diffusion -----
         denoiser = DiffusionTransformer(
             dim=dim,
             depth=depth,
@@ -271,7 +231,8 @@ class FlowDiffusionGenTron(nn.Module):
             mlp_dim=mlp_dim,
             time_emb_dim=dim,
             out_channels=2
-        )
+        ).cuda()
+
         self.diffusion = GaussianDiffusionGenTron(
             denoise_fn=denoiser,
             image_size=img_size,
@@ -286,6 +247,7 @@ class FlowDiffusionGenTron(nn.Module):
 
         if is_train:
             self.optimizer_diff = torch.optim.Adam(self.diffusion.parameters(), lr=lr, betas=adam_betas)
+            self.diffusion.train()  # ensure train mode
 
         # placeholders for visualization
         self.real_out_vid = None
@@ -297,7 +259,6 @@ class FlowDiffusionGenTron(nn.Module):
         self.real_vid_conf = None
         self.fake_vid_conf = None
 
-    # --------- Public API ---------
     def set_train_input(self, ref_img, real_vid, ref_text):
         self.ref_img = ref_img.cuda()
         self.real_vid = real_vid.cuda()
@@ -323,7 +284,6 @@ class FlowDiffusionGenTron(nn.Module):
         flow = torch.stack(grid, 2)              # [B, 2, F, H/4, W/4]
         conf_grid = torch.stack(conf, 2)         # [B, 1, F, H/4, W/4]
 
-        # store for visualization
         self.real_vid_grid = flow
         self.fake_vid_grid = flow
         self.real_vid_conf = conf_grid
@@ -334,10 +294,29 @@ class FlowDiffusionGenTron(nn.Module):
         if self.use_residual_flow:
             idg = self.get_grid(B, F, flow.shape[-2], flow.shape[-1])  # identity grid at flow res
             flow = flow - idg
+        den = self.diffusion.denoise_fn
+        in_ch = int(flow.shape[1] + feat.shape[1])  # e.g., 2 + 256 = 258
+        dev = flow.device
+
+        if (getattr(den, 'to_patch', None) is None) or (den.to_patch.in_channels != in_ch):
+            den.to_patch = nn.Conv3d(in_ch, den.dim, (1, 7, 7), padding=(0, 3, 3)).to(dev)
+            if hasattr(self, 'optimizer_diff'):
+                g0 = self.optimizer_diff.param_groups[0]
+                existing_ids = {id(p) for p in g0['params']}
+                for p in den.to_patch.parameters():
+                    if id(p) not in existing_ids:
+                        g0['params'].append(p)
+
+        Hf, Wf = flow.shape[-2], flow.shape[-1]
+        if len(den.blocks) == 0:
+            den.build_blocks(seq_len=Hf * Wf)
+            den.blocks.to(dev)
+        if not hasattr(self, '_logged_in_ch'):
+            print(f"[GenTron] to_patch.in_channels = {den.to_patch.in_channels}, "
+                  f"dim = {den.dim}, flowC = {flow.shape[1]}, featC = {feat.shape[1]}")
+            self._logged_in_ch = True
 
         self.loss = self.diffusion(flow, feat, self.ref_text)
-
-        # ensure null_cond_mask exists with correct batch size (no null by default)
         try:
             mask = self.diffusion.denoise_fn.null_cond_mask
             if mask.numel() == 0 or mask.shape[0] != B:
@@ -348,12 +327,12 @@ class FlowDiffusionGenTron(nn.Module):
         return self.loss
 
     def optimize_parameters(self):
-        l = self.forward()
         self.optimizer_diff.zero_grad()
+        l = self.forward()
         l.backward()
         self.optimizer_diff.step()
-        self.rec_loss = l
-        self.rec_warp_loss = l
+        self.rec_loss = float(l.detach().item())
+        self.rec_warp_loss = float(l.detach().item())
 
     @torch.no_grad()
     def sample_video(self, sample_img, sample_text, cond_scale=1.0):
@@ -362,47 +341,65 @@ class FlowDiffusionGenTron(nn.Module):
         self.real_out_vid = vid
         self.real_warped_vid = vid
         self.fake_out_vid = vid
-        # reuse last computed flow grid for visualization if available
         if self.real_vid_grid is not None:
             self.fake_vid_grid = self.real_vid_grid
         return vid
 
     def get_grid(self, B, F, H, W):
-        # Create identity grid in [-1,1] at (H, W), layout [B, 2, F, H, W]
         h = torch.linspace(-1, 1, H, device='cuda')
         w = torch.linspace(-1, 1, W, device='cuda')
         g = torch.stack(torch.meshgrid(h, w, indexing='ij'), -1).flip(2)  # [H, W, 2] -> (x,y)
-        g = g.unsqueeze(0).unsqueeze(2).repeat(B, 1, F, 1, 1)              # [B, H, F, W, 2]
-        return g.permute(0, 4, 2, 0+3, 1)  # [B, 2, F, H, W]
-        # Note: permute arguments expanded for clarity: dims (0,4,2,3,1)
-
-    # Optional separate sampling API kept minimal and consistent
+        g = g.unsqueeze(0).unsqueeze(2).repeat(B, 1, F, 1, 1)             # [B, H, F, W, 2]
+        return g.permute(0, 4, 2, 1, 3).contiguous()                      # [B, 2, F, H, W]
+    
     @torch.no_grad()
     def sample_one_video(self, cond_scale):
+        # đặc trưng từ LFAE (đã freeze)
         self.sample_img_fea = self.generator.compute_fea(self.sample_img)
-        pred = self.diffusion.sample(self.sample_img_fea, cond=self.sample_text, batch_size=1, cond_scale=cond_scale)
+
+        # diffusion trả về [B, 2, F, H, W] (u, v)
+        pred = self.diffusion.sample(
+            self.sample_img_fea,
+            cond=self.sample_text,
+            batch_size=1,
+            cond_scale=cond_scale
+        )  # [B, 2, F, H, W]
+
+        # flow 2 kênh
+        flow_uv = pred[:, :2, :, :, :]  # [B, 2, F, H, W]
+
+        # residual flow: cộng identity grid (chú ý: get_grid(B,F,H,W) không có normalize)
         if self.use_residual_flow:
-            b, _, nf, h, w = pred[:, :2, :, :, :].size()
-            identity_grid = self.get_grid(b, nf, h, w).cuda()
-            self.sample_vid_grid = pred[:, :2, :, :, :] + identity_grid
+            b, _, nf, h, w = flow_uv.size()
+            identity_grid = self.get_grid(b, nf, h, w).cuda()   # [B, 2, F, H, W]
+            self.sample_vid_grid = flow_uv + identity_grid
         else:
-            self.sample_vid_grid = pred[:, :2, :, :, :]
-        self.sample_vid_conf = (pred[:, 2, :, :, :].unsqueeze(dim=1) + 1) * 0.5
-        nf = self.sample_vid_grid.size(2)
+            self.sample_vid_grid = flow_uv
+
+        # MÔ HÌNH CHỈ CÓ 2 KÊNH -> conf = 1.0 (tin cậy đầy đủ)
+        b, _, nf, h, w = self.sample_vid_grid.size()
+        self.sample_vid_conf = torch.ones(b, 1, nf, h, w, device=self.sample_vid_grid.device)
+
+        # để đoạn save dùng conf/fake đúng từ sample
+        self.fake_vid_conf = self.sample_vid_conf
+
+        # Dựng video bằng LFAE
         sample_out_img_list = []
         sample_warped_img_list = []
         for idx in range(nf):
-            sample_grid = self.sample_vid_grid[:, :, idx, :, :].permute(0, 2, 3, 1)
-            sample_conf = self.sample_vid_conf[:, :, idx, :, :]
-            generated = self.generator.forward_with_flow(source_image=self.sample_img,
-                                                          optical_flow=sample_grid,
-                                                          occlusion_map=sample_conf)
+            sample_grid = self.sample_vid_grid[:, :, idx, :, :].permute(0, 2, 3, 1)  # [B, H, W, 2]
+            sample_conf = self.sample_vid_conf[:, :, idx, :, :]                      # [B, 1, H, W]
+            generated = self.generator.forward_with_flow(
+                source_image=self.sample_img,
+                optical_flow=sample_grid,
+                occlusion_map=sample_conf
+            )
             sample_out_img_list.append(generated["prediction"])
             sample_warped_img_list.append(generated["deformed"])
-        self.sample_out_vid = torch.stack(sample_out_img_list, dim=2)
+
+        self.sample_out_vid    = torch.stack(sample_out_img_list, dim=2)  # [B, 3, F, H, W]
         self.sample_warped_vid = torch.stack(sample_warped_img_list, dim=2)
 
-    # Convenience setters
     def set_sample_input(self, sample_img, sample_text):
         self.sample_img = sample_img.cuda()
         self.sample_text = sample_text
