@@ -21,8 +21,8 @@ from torch.optim.lr_scheduler import MultiStepLR
 
 start = timeit.default_timer()
 BATCH_SIZE = 4
-MAX_EPOCH = 10000
-epoch_milestones = [600, 800]
+MAX_EPOCH = 1200
+epoch_milestones = [800, 1000]
 root_dir = 'log'
 data_dir = "/kaggle/input/mhad-mini/crop_image_mini"
 GPU = "0,1"
@@ -37,7 +37,7 @@ config_pth = "config/mhad128.yaml"
 AE_RESTORE_FROM = "/kaggle/input/checkpoints-mhad-clfdm/RegionMM.pth"
 INPUT_SIZE = 128
 N_FRAMES = 40
-LEARNING_RATE = 2e-3
+LEARNING_RATE = 2e-4
 RANDOM_SEED = 1234
 MEAN = (0.0, 0.0, 0.0)
 RESTORE_FROM = ""
@@ -45,14 +45,14 @@ SNAPSHOT_DIR = os.path.join(root_dir, 'snapshots'+postfix)
 IMGSHOT_DIR = os.path.join(root_dir, 'imgshots'+postfix)
 VIDSHOT_DIR = os.path.join(root_dir, "vidshots"+postfix)
 SAMPLE_DIR = os.path.join(root_dir, 'sample'+postfix)
-NUM_EXAMPLES_PER_EPOCH = 80
+NUM_EXAMPLES_PER_EPOCH = 431
 NUM_STEPS_PER_EPOCH = math.ceil(NUM_EXAMPLES_PER_EPOCH / float(BATCH_SIZE))
 MAX_ITER = max(NUM_EXAMPLES_PER_EPOCH * MAX_EPOCH + 1,
                NUM_STEPS_PER_EPOCH * BATCH_SIZE * MAX_EPOCH + 1)
 SAVE_MODEL_EVERY = NUM_STEPS_PER_EPOCH * (MAX_EPOCH // 3)
 SAVE_VID_EVERY = 1000
-SAMPLE_VID_EVERY = 1000
-UPDATE_MODEL_EVERY = 1000
+SAMPLE_VID_EVERY = 2000
+UPDATE_MODEL_EVERY = 3000
 
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(IMGSHOT_DIR, exist_ok=True)
@@ -155,7 +155,7 @@ def main():
     elif args.restore_from:
         if os.path.isfile(args.restore_from):
             print("=> loading checkpoint '{}'".format(args.restore_from))
-            checkpoint = torch.load(args.restore_from, map_location="cpu")
+            checkpoint = torch.load(args.restore_from)
             if args.set_start and 'example' in checkpoint:
                 args.start_step = int(math.ceil(checkpoint['example'] / args.batch_size))
             diff_sd = checkpoint.get('diffusion', {})
