@@ -111,7 +111,7 @@ class DiffusionTransformer(nn.Module):
             SinusoidalPosEmb(time_emb_dim),
             nn.Linear(time_emb_dim, dim)
         )
-        self.to_patch = None  # sẽ được gán đúng in_channels ở call-site trước khi optimize
+        self.to_patch = None
         self.to_out = nn.Conv3d(dim, out_channels, 1)
         self.blocks = nn.ModuleList([])
         self.seq_k = seq_k
