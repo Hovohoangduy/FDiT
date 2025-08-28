@@ -102,7 +102,7 @@ class TransformerBlock(nn.Module):
 
 
 class DiffusionTransformer(nn.Module):
-    def __init__(self, dim, depth, heads, mlp_dim, time_emb_dim, out_channels, seq_k=64):
+    def __init__(self, dim, depth, heads, mlp_dim, time_emb_dim, out_channels, in_channels, seq_k=64):
         super().__init__()
         self.dim = dim
         self.out_channels = out_channels
@@ -111,7 +111,7 @@ class DiffusionTransformer(nn.Module):
             SinusoidalPosEmb(time_emb_dim),
             nn.Linear(time_emb_dim, dim)
         )
-        self.to_patch = None
+        self.to_patch = nn.Conv3d(in_channels, dim, self.kernel, padding=self.padding)
         self.to_out = nn.Conv3d(dim, out_channels, 1)
         self.blocks = nn.ModuleList([])
         self.seq_k = seq_k
@@ -128,12 +128,8 @@ class DiffusionTransformer(nn.Module):
     def forward(self, x, t, cond=None, *args, **kwargs):
         B, C, F, H, W = x.shape
         device = x.device
-        if self.to_patch is None or self.to_patch.in_channels != C:
-            self.to_patch = nn.Conv3d(C, self.dim, self.kernel, padding=self.padding).to(device)
-
         x = self.to_patch(x)                            # [B, D, F, H, W]
         x = rearrange(x, 'b d f h w -> (b f) (h w) d')  # [B*F, L, D]
-
         t = t.to(device)
         t_emb = self.time_mlp(t)                        # [B, D]
         c = repeat(t_emb, 'b d -> (b f) d', f=F)        # [B*F, D]
@@ -142,9 +138,9 @@ class DiffusionTransformer(nn.Module):
             self.blocks.to(device)
         for blk in self.blocks:
             x = blk(x, c)  # [B*F, L, D]
-        x_t = rearrange(x, '(b f) n d -> (n b) f d', b=B, f=F)  # [N*B, F, D]
-        x_t, _ = self.temp_attn(x_t, x_t, x_t)                  # [N*B, F, D]
-        x = rearrange(x_t, '(n b) f d -> (b f) n d', b=B, f=F)  # [B*F, L, D]
+        x_t = rearrange(x, '(b f) n d -> (n b) f d', b=B, f=F)
+        x_t, _ = self.temp_attn(x_t, x_t, x_t)
+        x = rearrange(x_t, '(n b) f d -> (b f) n d', b=B, f=F)
         x = rearrange(x, '(b f) (h w) d -> b d f h w', b=B, f=F, h=H, w=W)
         return self.to_out(x).to(device)
     
@@ -224,14 +220,18 @@ class FlowDiffusionGenTron(nn.Module):
             self.region_predictor.eval(); self.set_requires_grad(self.region_predictor, False)
             self.bg_predictor.eval(); self.set_requires_grad(self.bg_predictor, False)
 
+        in_channels = 258
+
         denoiser = DiffusionTransformer(
             dim=dim,
             depth=depth,
             heads=heads,
             mlp_dim=mlp_dim,
             time_emb_dim=dim,
-            out_channels=2
+            out_channels=2,
+            in_channels=in_channels
         ).cuda()
+
 
         self.diffusion = GaussianDiffusionGenTron(
             denoise_fn=denoiser,
@@ -297,15 +297,6 @@ class FlowDiffusionGenTron(nn.Module):
         den = self.diffusion.denoise_fn
         in_ch = int(flow.shape[1] + feat.shape[1])  # e.g., 2 + 256 = 258
         dev = flow.device
-
-        if (getattr(den, 'to_patch', None) is None) or (den.to_patch.in_channels != in_ch):
-            den.to_patch = nn.Conv3d(in_ch, den.dim, (1, 7, 7), padding=(0, 3, 3)).to(dev)
-            if hasattr(self, 'optimizer_diff'):
-                g0 = self.optimizer_diff.param_groups[0]
-                existing_ids = {id(p) for p in g0['params']}
-                for p in den.to_patch.parameters():
-                    if id(p) not in existing_ids:
-                        g0['params'].append(p)
 
         Hf, Wf = flow.shape[-2], flow.shape[-1]
         if len(den.blocks) == 0:

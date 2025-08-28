@@ -55,7 +55,7 @@ MAX_ITER = max(NUM_EXAMPLES_PER_EPOCH * MAX_EPOCH + 1,
 SAVE_MODEL_EVERY = NUM_STEPS_PER_EPOCH * (MAX_EPOCH // 3)
 SAVE_VID_EVERY = 1000
 SAMPLE_VID_EVERY = 2000
-UPDATE_MODEL_EVERY = 3000
+UPDATE_MODEL_EVERY = 500
 
 ### parameters with gentron
 MODEL_DIM = 128
@@ -234,7 +234,7 @@ def main():
 
     cnt = 0
     actual_step = args.start_step
-    start_epoch = 889
+    start_epoch = int(math.ceil((args.start_step * args.batch_size)/NUM_EXAMPLES_PER_EPOCH))
     epoch_cnt = start_epoch
     for param_group in model.optimizer_diff.param_groups:
         if 'initial_lr' not in param_group:
