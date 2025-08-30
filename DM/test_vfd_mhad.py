@@ -14,13 +14,14 @@ from misc import grid2fig, conf2fig
 from DM.datasets_mhad import MHAD_test
 import random
 from DM.modules.vfdm import FlowDiffusion
+from DM.modules.vfdm_multiGPU_with_gentron import FlowDiffusionGenTron
 
 
 start = timeit.default_timer()
 BATCH_SIZE = 10
-root_dir = '/data/hfn5052/text2motion/videoflowdiff_mhad'
-data_dir = "/data/hfn5052/text2motion/dataset/MHAD/crop_image"
-GPU = "3"
+root_dir = 'log'
+data_dir = "datasets/UTD-MHAD/crop_image_128"
+GPU = "0"
 postfix = "-j-sl-random-of"
 if "ddim" in postfix:
     sampling_timesteps = 10
@@ -35,9 +36,19 @@ NUM_ITER = NUM_VIDEOS // BATCH_SIZE
 MEAN = (0.0, 0.0, 0.0)
 cond_scale = 1.
 # the path to trained DM
-RESTORE_FROM = "/data/hfn5052/text2motion/videoflowdiff/snapshots-joint-steplr-random-onlyflow-train-regionmm/" \
-               "flowdiff_0006_S086400.pth"
+RESTORE_FROM = "log//mhad128/snaps_diff/flowdiff.pth"
+AE_RESTORE_FROM = "log/mhad128/snapshots/RegionMM.pth"
 CKPT_DIR = os.path.join(root_dir, "ckpt"+postfix)
+MODEL_DIM = 128
+MODEL_DEPTH = 4
+MODEL_HEADS = 2
+MODEL_DIM_HEAD = 32
+MODEL_MLP_DIM = 512
+DIFF_TIMESTEPS = 1000 
+DDIM_ETA = 0.0  
+ADAM_BETAS = (0.9, 0.999)
+only_use_flow = "onlyflow" in postfix or "-of" in postfix
+config_pth = "config/mhad128.yaml"
 os.makedirs(CKPT_DIR, exist_ok=True)
 IMG_DIR = os.path.join(root_dir, "ckpt_img"+postfix)
 os.makedirs(IMG_DIR, exist_ok=True)
@@ -92,10 +103,26 @@ def main():
     cudnn.benchmark = True
     setup_seed(args.random_seed)
 
-    model = FlowDiffusion(is_train=True,
-                          sampling_timesteps=sampling_timesteps,
-                          config_pth="/workspace/code/demo-dgx2/RegionMM/mhad128.yaml",
-                          pretrained_pth="/data/hfn5052/text2motion/RegionMM/log/mhad128/snapshots/RegionMM_0100_S043100.pth")
+    model = FlowDiffusionGenTron(
+        img_size=INPUT_SIZE // 4,
+        num_frames=N_FRAMES,
+        sampling_timesteps=DIFF_TIMESTEPS,
+        null_cond_prob=0.1,
+        ddim_sampling_eta=DDIM_ETA,
+        timesteps=DIFF_TIMESTEPS,
+        dim=MODEL_DIM,
+        depth=MODEL_DEPTH,
+        heads=MODEL_HEADS,
+        dim_head=MODEL_DIM_HEAD,
+        mlp_dim=MODEL_MLP_DIM,
+        lr=1e-4,
+        adam_betas=ADAM_BETAS,
+        is_train=True,
+        only_use_flow = only_use_flow,
+        use_residual_flow=True,
+        pretrained_pth=AE_RESTORE_FROM,
+        config_pth=config_pth
+    )
     model.cuda()
 
     if args.restore_from:

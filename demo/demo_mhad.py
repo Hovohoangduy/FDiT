@@ -13,9 +13,11 @@ from PIL import Image
 from misc import grid2fig, conf2fig
 import random
 from DM.modules.vfdm import FlowDiffusion
+from DM.modules.vfdm_with_gentron import FlowDiffusionGenTron
 from misc import resize
 import cv2
 import matplotlib.pyplot as plt
+import math
 
 start = timeit.default_timer()
 root_dir = 'datasets/UTD-MHAD/demo'
@@ -26,10 +28,20 @@ N_FRAMES = 40
 RANDOM_SEED = 2222
 MEAN = (0.0, 0.0, 0.0)
 cond_scale = 1.
+only_use_flow = "onlyflow" in postfix or "-of" in postfix 
 # downloaded the pretrained DM model and put its path here
 RESTORE_FROM = "log/mhad128/snaps_diff/flowdiff.pth"
 # downloaded the pretrained LFAE model and put its path here
 AE_RESTORE_FROM = "log/mhad128/snapshots/RegionMM.pth"
+
+MODEL_DIM = 128
+MODEL_DEPTH = 4
+MODEL_HEADS = 2
+MODEL_DIM_HEAD = 32
+MODEL_MLP_DIM = 512
+DIFF_TIMESTEPS = 1000 
+DDIM_ETA = 0.0  
+ADAM_BETAS = (0.9, 0.999)
 config_pth = "config/mhad128.yaml"
 CKPT_DIR = os.path.join(root_dir, "demo"+postfix)
 os.makedirs(CKPT_DIR, exist_ok=True)
@@ -50,6 +62,7 @@ def get_arguments():
     parser.add_argument("--num-workers", default=1)
     parser.add_argument("--gpu", default=GPU,
                         help="choose gpu device.")
+    parser.add_argument("--set-start", default=False)
     parser.add_argument('--print-freq', '-p', default=10, type=int,
                         metavar='N', help='print frequency')
     parser.add_argument("--input-size", type=str, default=INPUT_SIZE,
@@ -82,20 +95,56 @@ def main():
     cudnn.benchmark = True
     setup_seed(args.random_seed)
 
-    model = FlowDiffusion(is_train=True,
-                          sampling_timesteps=1000,
-                          pretrained_pth=AE_RESTORE_FROM,
-                          config_pth=config_pth)
+    model = FlowDiffusionGenTron(
+        img_size=INPUT_SIZE // 4,
+        num_frames=N_FRAMES,
+        sampling_timesteps=DIFF_TIMESTEPS,
+        null_cond_prob=0.1,
+        ddim_sampling_eta=DDIM_ETA,
+        timesteps=DIFF_TIMESTEPS,
+        dim=MODEL_DIM,
+        depth=MODEL_DEPTH,
+        heads=MODEL_HEADS,
+        dim_head=MODEL_DIM_HEAD,
+        mlp_dim=MODEL_MLP_DIM,
+        lr=1e-4,
+        adam_betas=ADAM_BETAS,
+        is_train=True,
+        only_use_flow = only_use_flow,
+        use_residual_flow=True,
+        pretrained_pth=AE_RESTORE_FROM,
+        config_pth=config_pth
+    )
     model.cuda()
 
     if args.restore_from:
         if os.path.isfile(args.restore_from):
-            print("=> loading checkpoint '{}'".format(args.restore_from))
+            print(f"=> loading checkpoint '{args.restore_from}'")
             checkpoint = torch.load(args.restore_from)
-            model.diffusion.load_state_dict(checkpoint['diffusion'])
-            print("=> loaded checkpoint '{}'".format(args.restore_from))
+            if 'diffusion' in checkpoint:
+                missing, unexpected = model.diffusion.load_state_dict(checkpoint['diffusion'], strict=False)
+                if missing:
+                    print("[state_dict] MISSING keys:", missing)
+                if unexpected:
+                    print("[state_dict] UNEXPECTED keys:", unexpected)
+                print(f"=> loaded diffusion weights from '{args.restore_from}'")
+            else:
+                print("=> WARNING: 'diffusion' weights not found in checkpoint")
+
+            if args.set_start and 'example' in checkpoint:
+                args.start_step = int(math.ceil(checkpoint['example'] / args.batch_size))
+                print("=> set start_step to", args.start_step)
+
+            if 'optimizer_diff' in checkpoint:
+                try:
+                    model.optimizer_diff.load_state_dict(checkpoint['optimizer_diff'])
+                    print("=> optimizer_diff state loaded")
+                except Exception as e:
+                    print("=> WARNING: could not load optimizer_diff:", str(e))
+            else:
+                print("=> WARNING: optimizer_diff not found in checkpoint")
         else:
-            print("=> no checkpoint found at '{}'".format(args.restore_from))
+            print(f"=> no checkpoint found at '{args.restore_from}'")
             exit(-1)
     else:
         print("NO checkpoint found!")
@@ -130,7 +179,7 @@ def main():
                    "forward lunge (left foot forward)",
                    "squat"]
 
-    ref_img_path = "demo/mhad_examples/a11_s4_t1_000.png"
+    ref_img_path = "demo/examples/a1_s1_t1_000.png"
     ref_img_name = os.path.basename(ref_img_path)[:-4]
     ref_img_npy = imageio.v2.imread(ref_img_path)[:, :, :3]
     ref_img_npy = cv2.resize(ref_img_npy, (336, 480), interpolation=cv2.INTER_AREA)

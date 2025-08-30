@@ -345,10 +345,9 @@ class FlowDiffusionGenTron(nn.Module):
     
     @torch.no_grad()
     def sample_one_video(self, cond_scale):
-        # đặc trưng từ LFAE (đã freeze)
         self.sample_img_fea = self.generator.compute_fea(self.sample_img)
 
-        # diffusion trả về [B, 2, F, H, W] (u, v)
+        # [B, 2, F, H, W] (u, v)
         pred = self.diffusion.sample(
             self.sample_img_fea,
             cond=self.sample_text,
@@ -356,25 +355,16 @@ class FlowDiffusionGenTron(nn.Module):
             cond_scale=cond_scale
         )  # [B, 2, F, H, W]
 
-        # flow 2 kênh
         flow_uv = pred[:, :2, :, :, :]  # [B, 2, F, H, W]
-
-        # residual flow: cộng identity grid (chú ý: get_grid(B,F,H,W) không có normalize)
         if self.use_residual_flow:
             b, _, nf, h, w = flow_uv.size()
             identity_grid = self.get_grid(b, nf, h, w).cuda()   # [B, 2, F, H, W]
             self.sample_vid_grid = flow_uv + identity_grid
         else:
             self.sample_vid_grid = flow_uv
-
-        # MÔ HÌNH CHỈ CÓ 2 KÊNH -> conf = 1.0 (tin cậy đầy đủ)
         b, _, nf, h, w = self.sample_vid_grid.size()
         self.sample_vid_conf = torch.ones(b, 1, nf, h, w, device=self.sample_vid_grid.device)
-
-        # để đoạn save dùng conf/fake đúng từ sample
         self.fake_vid_conf = self.sample_vid_conf
-
-        # Dựng video bằng LFAE
         sample_out_img_list = []
         sample_warped_img_list = []
         for idx in range(nf):
