@@ -108,26 +108,26 @@ def train(config, generator, region_predictor, bg_predictor, checkpoint, log_dir
             losses_equiv_shift.update(loss_values[1], bs)
             losses_equiv_affine.update(loss_values[2], bs)
 
-            # if actual_step % train_params["print_freq"] == 0:
-            #     print('iter: [{0}]{1}/{2}\t'
-            #           'loss {loss.val:.4f} ({loss.avg:.4f})\t'
-            #           'loss_perc {loss_perc.val:.4f} ({loss_perc.avg:.4f})\n'
-            #           'loss_shift {loss_shift.val:.4f} ({loss_shift.avg:.4f})\t'
-            #           'loss_affine {loss_affine.val:.4f} ({loss_affine.avg:.4f})'
-            #         .format(
-            #         cnt, actual_step, final_step,
-            #         loss=total_losses,
-            #         loss_perc=losses_perc,
-            #         loss_shift=losses_equiv_shift,
-            #         loss_affine=losses_equiv_affine
-            #     ))
+            if actual_step % train_params["print_freq"] == 0:
+                print('iter: [{0}]{1}/{2}\t'
+                      'loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'loss_perc {loss_perc.val:.4f} ({loss_perc.avg:.4f})\n'
+                      'loss_shift {loss_shift.val:.4f} ({loss_shift.avg:.4f})\t'
+                      'loss_affine {loss_affine.val:.4f} ({loss_affine.avg:.4f})'
+                    .format(
+                    cnt, actual_step, final_step,
+                    loss=total_losses,
+                    loss_perc=losses_perc,
+                    loss_shift=losses_equiv_shift,
+                    loss_affine=losses_equiv_affine
+                ))
 
-            # if actual_step % train_params['save_img_freq'] == 0:
-            #     save_image = visualizer.visualize(x['driving'], x['source'], generated, index=0)
-            #     save_name = 'B' + format(train_params["batch_size"], "04d") + '_S' + format(actual_step, "06d") \
-            #                 + '_' + x["frame"][0][0][:-4] + '_to_' + x["frame"][1][0][-7:]
-            #     save_file = os.path.join(config["imgshots"], save_name)
-            #     imageio.imsave(save_file, save_image)
+            if actual_step % train_params['save_img_freq'] == 0:
+                save_image = visualizer.visualize(x['driving'], x['source'], generated, index=0)
+                save_name = 'B' + format(train_params["batch_size"], "04d") + '_S' + format(actual_step, "06d") \
+                            + '_' + x["frame"][0][0][:-4] + '_to_' + x["frame"][1][0][-7:]
+                save_file = os.path.join(config["imgshots"], save_name)
+                imageio.imsave(save_file, save_image)
 
             if actual_step % config["save_ckpt_freq"] == 0 and cnt != 0:
                 print('taking snapshot...')
