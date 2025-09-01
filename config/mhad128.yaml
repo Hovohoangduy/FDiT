@@ -16,12 +16,12 @@ dataset_params:
       hue: 0.1
 
 model_params:
-  num_regions: 6
+  num_regions: 10
   num_channels: 3
   estimate_affine: True
   revert_axis_swap: True
   bg_predictor_params:
-    block_expansion: 16
+    block_expansion: 32
     max_features: 1024
     num_blocks: 5
     bg_type: 'affine'
@@ -59,7 +59,7 @@ train_params:
   lr: 2.0e-4
   batch_size: 64
   dataloader_workers: 6
-  print_freq: 1000
+  print_freq: 10
   save_img_freq: 100
   update_ckpt_freq: 1000
   scales: [1, 0.5, 0.25, 0.125]
