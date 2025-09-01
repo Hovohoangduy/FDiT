@@ -69,9 +69,9 @@ train_params:
     points_tps: 5
   loss_weights:
     ### VGG
-    # perceptual: [10, 10, 10, 10, 10]
+    perceptual: [10, 10, 10, 10, 10]
     ### ViT:
-    perceptual: [10, 10, 10]
+    # perceptual: [10, 10, 10]
     equivariance_shift: 10
     equivariance_affine: 10
 
