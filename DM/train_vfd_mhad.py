@@ -19,11 +19,11 @@ from DM.modules.vfdm_with_gentron import FlowDiffusionGenTron
 from torch.optim.lr_scheduler import MultiStepLR
 
 start = timeit.default_timer()
-BATCH_SIZE = 4
+BATCH_SIZE = 1
 MAX_EPOCH = 1200
 epoch_milestones = [800, 1000]
 root_dir = 'log'
-data_dir = "/kaggle/input/mhad-mini/crop_image_mini"
+data_dir = r"datasets\UTD-MHAD\crop_image_mini"
 GPU = "0"
 postfix = "-joint-steplr-random-onlyflow-train-regionmm"  # sl: step-lr, rmm:regionmm
 joint = "joint" in postfix or "-j" in postfix  # allow joint training with unconditional model
@@ -37,7 +37,7 @@ split_train_test = "train" in postfix or "-tr" in postfix
 use_residual_flow = "-rf" in postfix
 config_pth = "config/mhad128.yaml"
 # put your pretrained LFAE here
-AE_RESTORE_FROM = "/kaggle/input/checkpoints-mhad-clfdm/RegionMM.pth"
+AE_RESTORE_FROM = r"log\mhad128\snapshots\RegionMM.pth"
 INPUT_SIZE = 128
 N_FRAMES = 40
 LEARNING_RATE = 2e-4
@@ -54,7 +54,7 @@ MAX_ITER = max(NUM_EXAMPLES_PER_EPOCH * MAX_EPOCH + 1,
                NUM_STEPS_PER_EPOCH * BATCH_SIZE * MAX_EPOCH + 1)
 SAVE_MODEL_EVERY = NUM_STEPS_PER_EPOCH * (MAX_EPOCH // 3)
 SAVE_VID_EVERY = 1000
-SAMPLE_VID_EVERY = 2000
+SAMPLE_VID_EVERY = 10
 UPDATE_MODEL_EVERY = 500
 
 ### parameters with gentron
@@ -62,7 +62,7 @@ MODEL_DIM = 128
 MODEL_DEPTH = 4
 MODEL_HEADS = 2
 MODEL_DIM_HEAD = 32
-MODEL_MLP_DIM = 512
+MODEL_MLP_DIM = 256
 DIFF_TIMESTEPS = 1000 
 DDIM_ETA = 0.0  
 ADAM_BETAS = (0.9, 0.999)
