@@ -622,7 +622,8 @@ class GaussianDiffusion(nn.Module):
             loss_type='l1',
             use_dynamic_thres=False,  # from the Imagen paper
             dynamic_thres_percentile=0.9,
-            null_cond_prob=0.1
+            null_cond_prob=0.1,
+            is_transformer=False 
     ):
         super().__init__()
         self.null_cond_prob = null_cond_prob
@@ -630,6 +631,7 @@ class GaussianDiffusion(nn.Module):
         self.image_size = image_size
         self.num_frames = num_frames
         self.denoise_fn = denoise_fn
+        self.is_transformer = is_transformer
 
         betas = cosine_beta_schedule(timesteps)
 
@@ -858,15 +860,27 @@ class GaussianDiffusion(nn.Module):
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
 
+        if self.is_transformer:
+            pred_noise = self.denoise_fn.forward(
+                x_noisy, t, cond=fea  # fea là conditioning
+            )
+        else:
+            pred_noise = self.denoise_fn.forward(
+                torch.cat([x_noisy, fea], dim=1), t, cond=cond,
+                null_cond_prob=self.null_cond_prob,
+                none_cond_mask=none_cond_mask,
+                **kwargs
+            )
+
         if is_list_str(cond):
             none_cond_mask = [ii == "None" for ii in cond]
             cond = bert_embed(tokenize(cond), return_cls_repr=self.text_use_bert_cls)
             cond = cond.to(device)
 
-        pred_noise = self.denoise_fn.forward(torch.cat([x_noisy, fea], dim=1), t, cond=cond,
-                                        null_cond_prob=self.null_cond_prob,
-                                        none_cond_mask=none_cond_mask,
-                                        **kwargs)
+        # pred_noise = self.denoise_fn.forward(torch.cat([x_noisy, fea], dim=1), t, cond=cond,
+        #                                 null_cond_prob=self.null_cond_prob,
+        #                                 none_cond_mask=none_cond_mask,
+        #                                 **kwargs)
 
         if self.loss_type == 'l1':
             loss = F.l1_loss(noise, pred_noise)

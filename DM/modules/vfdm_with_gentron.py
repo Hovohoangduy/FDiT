@@ -2,7 +2,7 @@ import os
 import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as F_torch
 import yaml
 from einops import rearrange, repeat
 from LFAE.modules.generator import Generator
@@ -118,6 +118,7 @@ class DiffusionTransformer(nn.Module):
         self.heads = heads
         self.temp_attn = nn.MultiheadAttention(dim, heads, batch_first=True)
         self.register_buffer('null_cond_mask', torch.tensor([], dtype=torch.bool), persistent=False)
+        self.cond_proj = nn.Linear(256, dim)
 
     def build_blocks(self, seq_len):
         self.blocks = nn.ModuleList([
@@ -128,59 +129,45 @@ class DiffusionTransformer(nn.Module):
     def forward(self, x, t, cond=None, *args, **kwargs):
         B, C, F, H, W = x.shape
         device = x.device
+
         x = self.to_patch(x)                            # [B, D, F, H, W]
         x = rearrange(x, 'b d f h w -> (b f) (h w) d')  # [B*F, L, D]
+
         t = t.to(device)
         t_emb = self.time_mlp(t)                        # [B, D]
-        c = repeat(t_emb, 'b d -> (b f) d', f=F)        # [B*F, D]
+        t_emb = repeat(t_emb, 'b d -> (b f) d', f=F)    # [B*F, D]
+
+        if cond is not None:
+            # cond: [B, 256, F, H, W]
+            cond = cond.mean(dim=2)                                  # [B, 256, H, W]
+            cond = rearrange(cond, 'b d h w -> b d (h w)')            # [B, 256, H*W]
+            cond = F_torch.adaptive_avg_pool1d(cond, 1).squeeze(-1)   # [B, 256]
+            cond = self.cond_proj(cond)                               # [B, dim]
+            cond = repeat(cond, 'b d -> (b f) d', f=F)                # [B*F, dim]
+            c = t_emb + cond
+        else:
+            c = t_emb
+
         if len(self.blocks) == 0:
             self.build_blocks(seq_len=H * W)
             self.blocks.to(device)
+
         for blk in self.blocks:
             x = blk(x, c)  # [B*F, L, D]
+
         x_t = rearrange(x, '(b f) n d -> (n b) f d', b=B, f=F)
         x_t, _ = self.temp_attn(x_t, x_t, x_t)
         x = rearrange(x_t, '(n b) f d -> (b f) n d', b=B, f=F)
+
         x = rearrange(x, '(b f) (h w) d -> b d f h w', b=B, f=F, h=H, w=W)
-        return self.to_out(x).to(device)
-    
+        return self.to_out(x)
+
     def forward_with_cond_scale(self, x, t, cond=None, cond_scale=1.0, **kwargs):
         if cond is None or cond_scale is None or float(cond_scale) == 1.0:
             return self.forward(x, t, cond=cond)
         out_cond = self.forward(x, t, cond=cond)
         out_uncond = self.forward(x, t, cond=None)
         return out_uncond + (out_cond - out_uncond) * float(cond_scale)
-
-class GaussianDiffusionGenTron(GaussianDiffusion):
-    """
-    Gaussian diffusion tailored for GenTron, using 2-channel flow inputs.
-    Overrides default channel dimension to match latent flow channels.
-    """
-    def __init__(
-        self,
-        denoise_fn,
-        *,
-        image_size,
-        num_frames,
-        sampling_timesteps=250,
-        ddim_sampling_eta=1.,
-        timesteps=1000,
-        null_cond_prob=0.1,
-        loss_type='l2',
-        use_dynamic_thres=True
-    ):
-        super().__init__(
-            denoise_fn,
-            image_size=image_size,
-            num_frames=num_frames,
-            channels=2,
-            timesteps=timesteps,
-            sampling_timesteps=sampling_timesteps,
-            ddim_sampling_eta=ddim_sampling_eta,
-            loss_type=loss_type,
-            use_dynamic_thres=use_dynamic_thres,
-            null_cond_prob=null_cond_prob
-        )
 
 class FlowDiffusionGenTron(nn.Module):
     def __init__(self, img_size, num_frames, sampling_timesteps, null_cond_prob,
@@ -220,21 +207,21 @@ class FlowDiffusionGenTron(nn.Module):
             self.region_predictor.eval(); self.set_requires_grad(self.region_predictor, False)
             self.bg_predictor.eval(); self.set_requires_grad(self.bg_predictor, False)
 
-        in_channels = 258
+        in_channels = 259
 
-        denoiser = DiffusionTransformer(
+        self.dit = DiffusionTransformer(
             dim=dim,
             depth=depth,
             heads=heads,
             mlp_dim=mlp_dim,
             time_emb_dim=dim,
-            out_channels=2,
+            out_channels=259,
             in_channels=in_channels
         ).cuda()
 
 
-        self.diffusion = GaussianDiffusionGenTron(
-            denoise_fn=denoiser,
+        self.diffusion = GaussianDiffusion(
+            self.dit,
             image_size=img_size,
             num_frames=num_frames,
             sampling_timesteps=sampling_timesteps,
@@ -242,7 +229,8 @@ class FlowDiffusionGenTron(nn.Module):
             null_cond_prob=null_cond_prob,
             ddim_sampling_eta=ddim_sampling_eta,
             loss_type='l2',
-            use_dynamic_thres=True
+            use_dynamic_thres=True,
+            is_transformer=True
         ).cuda()
 
         if is_train:
@@ -271,43 +259,49 @@ class FlowDiffusionGenTron(nn.Module):
 
     def forward(self):
         B, _, F, H, W = self.real_vid.shape
-        grid, conf = [], []
+        grid, conf, feat_list = [], [], []
+
         with torch.no_grad():
             src = self.region_predictor(self.ref_img)
             for i in range(F):
-                drv = self.real_vid[:, :, i]
+                drv = self.real_vid[:, :, i]                            # [B, 3, H, W]
                 drv_p = self.region_predictor(drv)
                 bg_p = self.bg_predictor(self.ref_img, drv)
                 out = self.generator(self.ref_img, src, drv_p, bg_p)
-                grid.append(out['optical_flow'].permute(0, 3, 1, 2))   # [B, 2, H/4, W/4]
-                conf.append(out['occlusion_map'])
-        flow = torch.stack(grid, 2)              # [B, 2, F, H/4, W/4]
-        conf_grid = torch.stack(conf, 2)         # [B, 1, F, H/4, W/4]
+
+                grid.append(out['optical_flow'].permute(0, 3, 1, 2))     # [B, 2, H/4, W/4]
+                conf.append(out['occlusion_map'].unsqueeze(2))           # [B, 1, 1, H/4, W/4]
+                feat_list.append(out['bottle_neck_feat'].unsqueeze(2))   # [B, 256, 1, H/4, W/4]
+
+        flow = torch.stack(grid, 2)                    # [B, 2, F, H/4, W/4]
+        conf_grid = torch.cat(conf, dim=2)             # [B, 1, F, H/4, W/4]
+        feat = torch.cat(feat_list, dim=2)             # [B, 256, F, H/4, W/4]
 
         self.real_vid_grid = flow
         self.fake_vid_grid = flow
         self.real_vid_conf = conf_grid
         self.fake_vid_conf = conf_grid
 
-        feat = out['bottle_neck_feat'].detach()  # [B, Df, F, H', W'] (as produced by generator)
-
         if self.use_residual_flow:
-            idg = self.get_grid(B, F, flow.shape[-2], flow.shape[-1])  # identity grid at flow res
+            idg = self.get_grid(B, F, flow.shape[-2], flow.shape[-1])
             flow = flow - idg
-        den = self.diffusion.denoise_fn
-        in_ch = int(flow.shape[1] + feat.shape[1])  # e.g., 2 + 256 = 258
-        dev = flow.device
 
-        Hf, Wf = flow.shape[-2], flow.shape[-1]
+        feat_with_conf = torch.cat([feat, conf_grid], dim=1)  # [B, 257, F, H, W]
+        input_x = torch.cat([flow, feat_with_conf], dim=1)    # [B, 259, F, H, W]
+
+        den = self.diffusion.denoise_fn
         if len(den.blocks) == 0:
-            den.build_blocks(seq_len=Hf * Wf)
-            den.blocks.to(dev)
+            den.build_blocks(seq_len=flow.shape[-2] * flow.shape[-1])
+            den.blocks.to(flow.device)
+
         if not hasattr(self, '_logged_in_ch'):
             print(f"[GenTron] to_patch.in_channels = {den.to_patch.in_channels}, "
-                  f"dim = {den.dim}, flowC = {flow.shape[1]}, featC = {feat.shape[1]}")
+                  f"dim = {den.dim}, flowC = {flow.shape[1]}, featC = {feat.shape[1]}, confC = {conf_grid.shape[1]}")
             self._logged_in_ch = True
 
-        self.loss = self.diffusion(flow, feat, self.ref_text)
+        fea = self.generator.compute_fea(self.ref_img)   # [B, 256, H/4, W/4]
+        self.loss = self.diffusion(input_x, fea, self.ref_text)
+
         try:
             mask = self.diffusion.denoise_fn.null_cond_mask
             if mask.numel() == 0 or mask.shape[0] != B:
