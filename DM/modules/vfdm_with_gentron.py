@@ -118,7 +118,7 @@ class DiffusionTransformer(nn.Module):
         self.heads = heads
         self.temp_attn = nn.MultiheadAttention(dim, heads, batch_first=True)
         self.register_buffer('null_cond_mask', torch.tensor([], dtype=torch.bool), persistent=False)
-        self.cond_proj = nn.Linear(256, dim)
+        self.cond_proj = None
 
     def build_blocks(self, seq_len):
         self.blocks = nn.ModuleList([
@@ -138,12 +138,24 @@ class DiffusionTransformer(nn.Module):
         t_emb = repeat(t_emb, 'b d -> (b f) d', f=F)    # [B*F, D]
 
         if cond is not None:
-            # cond: [B, 256, F, H, W]
-            cond = cond.mean(dim=2)                                  # [B, 256, H, W]
-            cond = rearrange(cond, 'b d h w -> b d (h w)')            # [B, 256, H*W]
-            cond = F_torch.adaptive_avg_pool1d(cond, 1).squeeze(-1)   # [B, 256]
-            cond = self.cond_proj(cond)                               # [B, dim]
-            cond = repeat(cond, 'b d -> (b f) d', f=F)                # [B*F, dim]
+            if cond.dim() == 5:
+                cond = cond.mean(dim=2)                             # [B, C, H, W]
+                cond = rearrange(cond, 'b d h w -> b d (h w)')
+                cond = F_torch.adaptive_avg_pool1d(cond, 1).squeeze(-1)
+            elif cond.dim() == 4:
+                cond = rearrange(cond, 'b d h w -> b d (h w)')
+                cond = F_torch.adaptive_avg_pool1d(cond, 1).squeeze(-1)
+            elif cond.dim() == 3:
+                cond = F_torch.adaptive_avg_pool1d(cond, 1).squeeze(-1)
+            elif cond.dim() == 2:
+                pass
+            else:
+                raise ValueError(f"Unsupported cond shape: {cond.shape}")
+            if self.cond_proj is None or self.cond_proj.in_features != cond.shape[-1]:
+                self.cond_proj = nn.Linear(cond.shape[-1], self.dim).to(cond.device)
+
+            cond = self.cond_proj(cond)  # [B, dim]
+            cond = repeat(cond, 'b d -> (b f) d', f=F)
             c = t_emb + cond
         else:
             c = t_emb

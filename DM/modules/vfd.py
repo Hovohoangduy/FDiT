@@ -696,6 +696,8 @@ class GaussianDiffusion(nn.Module):
         return mean, variance, log_variance
 
     def predict_start_from_noise(self, x_t, t, noise):
+        if noise.shape[1] != x_t.shape[1]:
+            noise = noise[:, :x_t.shape[1]]
         return (
                 extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
                 extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
@@ -865,6 +867,12 @@ class GaussianDiffusion(nn.Module):
                 x_noisy, t, cond=fea  # fea là conditioning
             )
         else:
+            if is_list_str(cond):
+                none_cond_mask = [ii == "None" for ii in cond]
+                cond = bert_embed(tokenize(cond), return_cls_repr=self.text_use_bert_cls).to(device)
+            else:
+                none_cond_mask = None
+
             pred_noise = self.denoise_fn.forward(
                 torch.cat([x_noisy, fea], dim=1), t, cond=cond,
                 null_cond_prob=self.null_cond_prob,
@@ -872,16 +880,18 @@ class GaussianDiffusion(nn.Module):
                 **kwargs
             )
 
-        if is_list_str(cond):
-            none_cond_mask = [ii == "None" for ii in cond]
-            cond = bert_embed(tokenize(cond), return_cls_repr=self.text_use_bert_cls)
-            cond = cond.to(device)
+        # if is_list_str(cond):
+        #     none_cond_mask = [ii == "None" for ii in cond]
+        #     cond = bert_embed(tokenize(cond), return_cls_repr=self.text_use_bert_cls)
+        #     cond = cond.to(device)
 
         # pred_noise = self.denoise_fn.forward(torch.cat([x_noisy, fea], dim=1), t, cond=cond,
         #                                 null_cond_prob=self.null_cond_prob,
         #                                 none_cond_mask=none_cond_mask,
         #                                 **kwargs)
-
+        if pred_noise.shape[1] != x_start.shape[1]:
+            pred_noise = pred_noise[:, :x_start.shape[1]]
+            
         if self.loss_type == 'l1':
             loss = F.l1_loss(noise, pred_noise)
         elif self.loss_type == 'l2':

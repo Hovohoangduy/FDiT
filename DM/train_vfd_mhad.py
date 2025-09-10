@@ -19,7 +19,7 @@ from DM.modules.vfdm_with_gentron import FlowDiffusionGenTron
 from torch.optim.lr_scheduler import MultiStepLR
 
 start = timeit.default_timer()
-BATCH_SIZE = 2
+BATCH_SIZE = 1
 MAX_EPOCH = 1200
 epoch_milestones = [800, 1000]
 root_dir = 'log'
