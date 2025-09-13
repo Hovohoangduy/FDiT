@@ -19,7 +19,7 @@ from DM.modules.vfdm_with_gentron import FlowDiffusionGenTron
 from torch.optim.lr_scheduler import MultiStepLR
 
 start = timeit.default_timer()
-BATCH_SIZE = 2
+BATCH_SIZE = 1
 MAX_EPOCH = 1200
 epoch_milestones = [800, 1000]
 root_dir = 'log'
@@ -58,14 +58,14 @@ SAMPLE_VID_EVERY = 2000
 UPDATE_MODEL_EVERY = 500
 
 ### parameters with gentron
-MODEL_DIM = 256
+MODEL_DIM = 512
 MODEL_DEPTH = 12
-MODEL_HEADS = 4
-MODEL_DIM_HEAD = 128
-MODEL_MLP_DIM = 512
+MODEL_HEADS = 8
+MODEL_DIM_HEAD = 64
+MODEL_MLP_DIM = 2048
 DIFF_TIMESTEPS = 1000 
 DDIM_ETA = 0.0  
-ADAM_BETAS = (0.9, 0.999)
+ADAM_BETAS = (0.95, 0.999)
 
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(IMGSHOT_DIR, exist_ok=True)
