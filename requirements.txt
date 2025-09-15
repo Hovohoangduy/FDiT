@@ -22,3 +22,6 @@ torchaudio==2.2.0+cu118
 tqdm
 transformers==4.41.0
 accelerate==0.24.1
+pytorch-fid
+torchmetrics
+torchmetrics[image]
