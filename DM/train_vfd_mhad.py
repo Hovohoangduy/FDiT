@@ -20,8 +20,8 @@ from torch.optim.lr_scheduler import MultiStepLR
 
 start = timeit.default_timer()
 BATCH_SIZE = 1
-MAX_EPOCH = 3000
-epoch_milestones = [2000, 2600]
+MAX_EPOCH = 1200
+epoch_milestones = [800, 1000]
 root_dir = 'log'
 data_dir = "/kaggle/input/mhad-mini/crop_image_mini"
 GPU = "0"
@@ -58,11 +58,11 @@ SAMPLE_VID_EVERY = 2000
 UPDATE_MODEL_EVERY = 500
 
 ### parameters with gentron
-MODEL_DIM = 384
-MODEL_DEPTH = 8
-MODEL_HEADS = 6
+MODEL_DIM = 512
+MODEL_DEPTH = 12
+MODEL_HEADS = 8
 MODEL_DIM_HEAD = 64
-MODEL_MLP_DIM = 1536
+MODEL_MLP_DIM = 2048
 DIFF_TIMESTEPS = 1000 
 DDIM_ETA = 0.0  
 ADAM_BETAS = (0.95, 0.999)
