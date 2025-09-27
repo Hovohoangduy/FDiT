@@ -1,1 +1,1 @@
-# Latent Flow Diffusion Model with GenTron
+# FDiT
