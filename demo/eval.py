@@ -11,7 +11,7 @@ import timeit
 from PIL import Image
 from misc import grid2fig, conf2fig
 import random
-from DM.modules.vfdm_with_gentron import FlowDiffusionGenTron
+from DM.modules.fdit import FDiT
 from misc import resize
 import cv2
 import math
@@ -83,7 +83,7 @@ def main():
     cudnn.benchmark = True
     setup_seed(args.random_seed)
 
-    model = FlowDiffusionGenTron(
+    model = FDiT(
         img_size=INPUT_SIZE // 4,
         num_frames=N_FRAMES,
         sampling_timesteps=DIFF_TIMESTEPS,
