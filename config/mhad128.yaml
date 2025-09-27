@@ -1,6 +1,4 @@
 dataset_params:
-  # root_dir: datasets/UTD-MHAD/crop_image_mini
-  ### Kaggel dir
   root_dir: /kaggle/input/mhad-mini/crop_image_mini
   frame_shape: 128
   id_sampling: True
@@ -53,12 +51,12 @@ model_params:
     pose_bottle_size: 64
 
 train_params:
-  max_epochs: 100
-  num_repeats: 100
-  epoch_milestones: [60, 90]
+  max_epochs: 150
+  num_repeats: 150
+  epoch_milestones: [110, 130]
   lr: 2.0e-4
-  batch_size: 64
-  dataloader_workers: 6
+  batch_size: 48
+  dataloader_workers: 4
   print_freq: 10
   save_img_freq: 100
   update_ckpt_freq: 1000
@@ -68,10 +66,7 @@ train_params:
     sigma_tps: 0.005
     points_tps: 5
   loss_weights:
-    ### VGG
-    perceptual: [10, 10, 10, 10, 10]
-    ### ViT:
-    # perceptual: [10, 10, 10]
+    perceptual: [10]
     equivariance_shift: 10
     equivariance_affine: 10
 

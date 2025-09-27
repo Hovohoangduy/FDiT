@@ -5,73 +5,34 @@ from LFAE.modules.util import AntiAliasInterpolation2d, make_coordinate_grid
 from torchvision import models
 import numpy as np
 from torch.autograd import grad
-import timm
-from timm.data import resolve_data_config
-from timm.data.transforms_factory import create_transform
+import clip
+import torchvision.transforms as T
 
-class ViT(nn.Module):
+class CLIPEncoder(nn.Module):
     def __init__(self, requires_grad=False):
-        super(ViT, self).__init__()
-        self.model = timm.create_model('vit_tiny_patch16_224', pretrained=True, features_only=True)
-        self.model.eval()
+        super(CLIPEncoder, self).__init__()
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model, self.preprocess = clip.load("ViT-B/32", device=self.device)
+        self.model = self.model.float()
+        self.visual = self.model.visual
 
         if not requires_grad:
-            for param in self.parameters():
+            for param in self.visual.parameters():
                 param.requires_grad = False
-
-        config = resolve_data_config({}, model=self.model)
-        self.transform = create_transform(**config)
-
+        
+        self.normalize = T.Normalize(
+            mean=[0.48145466, 0.4578275, 0.40821073],
+            std=[0.26862954, 0.26130258, 0.27577711],
+        )
+    
     def forward(self, x):
-        x = self.transform(x)
-        x = x.unsqueeze(0) if x.ndim == 3 else x
-        features = self.model(x)
-        # print(">>> [ViT DEBUG] features len:", len(features))  # Check here
-        return features
-
-class Vgg19(torch.nn.Module):
-    """
-    Vgg19 network for perceptual loss.
-    """
-
-    def __init__(self, requires_grad=False):
-        super(Vgg19, self).__init__()
-        vgg_pretrained_features = models.vgg19(pretrained=True).features
-        self.slice1 = torch.nn.Sequential()
-        self.slice2 = torch.nn.Sequential()
-        self.slice3 = torch.nn.Sequential()
-        self.slice4 = torch.nn.Sequential()
-        self.slice5 = torch.nn.Sequential()
-        for x in range(2):
-            self.slice1.add_module(str(x), vgg_pretrained_features[x])
-        for x in range(2, 7):
-            self.slice2.add_module(str(x), vgg_pretrained_features[x])
-        for x in range(7, 12):
-            self.slice3.add_module(str(x), vgg_pretrained_features[x])
-        for x in range(12, 21):
-            self.slice4.add_module(str(x), vgg_pretrained_features[x])
-        for x in range(21, 30):
-            self.slice5.add_module(str(x), vgg_pretrained_features[x])
-
-        self.mean = torch.nn.Parameter(data=torch.Tensor(np.array([0.485, 0.456, 0.406]).reshape((1, 3, 1, 1))),
-                                       requires_grad=False)
-        self.std = torch.nn.Parameter(data=torch.Tensor(np.array([0.229, 0.224, 0.225]).reshape((1, 3, 1, 1))),
-                                      requires_grad=False)
-
-        if not requires_grad:
-            for param in self.parameters():
-                param.requires_grad = False
-
-    def forward(self, x):
-        x = (x - self.mean) / self.std
-        h_relu1 = self.slice1(x)
-        h_relu2 = self.slice2(h_relu1)
-        h_relu3 = self.slice3(h_relu2)
-        h_relu4 = self.slice4(h_relu3)
-        h_relu5 = self.slice5(h_relu4)
-        out = [h_relu1, h_relu2, h_relu3, h_relu4, h_relu5]
-        return out
-
+        x = F.interpolate(x, size=(224, 224), mode="bilinear", align_corners=False)
+        if x.min().item() < 0.0:
+            x = (x + 1) / 2.0
+        x = torch.clamp(x, 0, 1)
+        x = self.normalize(x)
+        x = x.to(self.device).float()
+        return self.visual(x)
 
 class ImagePyramide(torch.nn.Module):
     """
@@ -168,12 +129,12 @@ class ReconstructionModel(torch.nn.Module):
             self.pyramid = self.pyramid.cuda()
 
         self.loss_weights = train_params['loss_weights']
+        percep_w = self.loss_weights['perceptual']
 
-        if sum(self.loss_weights['perceptual']) != 0:
-            self.vgg = Vgg19()
-            # self.vgg = ViT()
+        if (percep_w if isinstance(percep_w, (int, float)) else sum(percep_w)) != 0:
+            self.clip_encoder = CLIPEncoder()
             if torch.cuda.is_available():
-                self.vgg = self.vgg.cuda()
+                self.clip_encoder = self.clip_encoder.cuda()
 
     def forward(self, x):
         source_region_params = self.region_predictor(x['source'])
@@ -188,16 +149,21 @@ class ReconstructionModel(torch.nn.Module):
 
         pyramide_real = self.pyramid(x['driving'])
         pyramide_generated = self.pyramid(generated['prediction'])
-
-        if sum(self.loss_weights['perceptual']) != 0:
+        percep_w = self.loss_weights['perceptual']
+        if (percep_w if isinstance(percep_w, (int, float)) else sum(percep_w)) != 0:
             value_total = 0
-            for scale in self.scales:
-                x_vgg = self.vgg(pyramide_generated['prediction_' + str(scale)])
-                y_vgg = self.vgg(pyramide_real['prediction_' + str(scale)])
+            for idx, scale in enumerate(self.scales):
+                x_feat = self.clip_encoder(pyramide_generated['prediction_' + str(scale)])
+                y_feat = self.clip_encoder(pyramide_real['prediction_' + str(scale)])
 
-                for i, weight in enumerate(self.loss_weights['perceptual']):
-                    value = torch.abs(x_vgg[i] - y_vgg[i].detach()).mean()
-                    value_total += self.loss_weights['perceptual'][i] * value
+                value = 1 - F.cosine_similarity(x_feat, y_feat, dim=-1).mean()
+
+                if isinstance(percep_w, (int, float)):
+                    value_total = value_total + percep_w * value
+                else:
+                    weight = percep_w[idx] if idx < len(percep_w) else percep_w[-1]
+                    value_total = value_total + weight * value
+
             loss_values['perceptual'] = value_total
 
         if (self.loss_weights['equivariance_shift'] + self.loss_weights['equivariance_affine']) != 0:
@@ -227,7 +193,10 @@ class ReconstructionModel(torch.nn.Module):
 
                 value = torch.abs(eye - value).mean()
                 loss_values['equivariance_affine'] = self.loss_weights['equivariance_affine'] * value
+            for k, v in loss_values.items():
+                if not torch.is_tensor(v):
+                    loss_values[k] = torch.tensor(
+                        v, dtype=torch.float32, device=x['source'].device
+                    )
 
         return loss_values, generated
-
-

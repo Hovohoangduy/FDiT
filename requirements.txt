@@ -25,3 +25,4 @@ accelerate==0.24.1
 pytorch-fid
 torchmetrics
 torchmetrics[image]
+openai-clip
