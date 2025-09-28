@@ -146,7 +146,7 @@ def main():
     nf = 40
     cnt = 0
 
-    fid = FrechetInceptionDistance(feature=64).cuda()
+    fid = FrechetInceptionDistance(feature=128).cuda()
     inception = InceptionScore().cuda()
 
     for ref_text in action_list:

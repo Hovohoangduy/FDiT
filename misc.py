@@ -63,7 +63,7 @@ def grid2fig(warped_grid, grid_size=32, img_size=256):
     return out
 
 
-def flow2fig(warped_grid, id_grid, grid_size=32, img_size=64):
+def flow2fig(warped_grid, id_grid, grid_size=32, img_size=128):
     # h_range = torch.linspace(-1, 1, grid_size)
     # w_range = torch.linspace(-1, 1, grid_size)
     # id_grid = torch.stack(torch.meshgrid([h_range, w_range]), -1).flip(2)
@@ -73,7 +73,7 @@ def flow2fig(warped_grid, id_grid, grid_size=32, img_size=64):
     return img
 
 
-def conf2fig(conf, img_size=64):
+def conf2fig(conf, img_size=128):
     conf = F.interpolate(conf.unsqueeze(dim=0), size=img_size).data.cpu().numpy()
     conf = np.transpose(conf, [0, 2, 3, 1])
     conf = np.array(conf[0, :, :, 0]*255, dtype=np.uint8)

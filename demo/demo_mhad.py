@@ -23,7 +23,7 @@ start = timeit.default_timer()
 root_dir = 'datasets/UTD-MHAD/demo'
 GPU = "0"
 postfix = "-j-sl-random-of-tr-rmm"
-INPUT_SIZE = 64
+INPUT_SIZE = 128
 N_FRAMES = 40
 RANDOM_SEED = 2222
 MEAN = (0.0, 0.0, 0.0)
@@ -183,7 +183,7 @@ def main():
     ref_img_name = os.path.basename(ref_img_path)[:-4]
     ref_img_npy = imageio.v2.imread(ref_img_path)[:, :, :3]
     ref_img_npy = cv2.resize(ref_img_npy, (336, 480), interpolation=cv2.INTER_AREA)
-    ref_img_npy = resize(ref_img_npy, 64, interpolation=cv2.INTER_AREA)
+    ref_img_npy = resize(ref_img_npy, 128, interpolation=cv2.INTER_AREA)
     ref_img_npy = np.asarray(ref_img_npy, np.float32)
     ref_img_npy = ref_img_npy - np.array(MEAN)
     ref_img = torch.from_numpy(ref_img_npy/255.0)
