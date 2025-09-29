@@ -58,8 +58,9 @@ train_params:
   batch_size: 48
   dataloader_workers: 6
   print_freq: 10
-  save_img_freq: 100
-  update_ckpt_freq: 1000
+  save_img_freq: 1000
+  save_ckpt_freq: 3000
+  update_ckpt_freq: 3000
   scales: [1, 0.5, 0.25, 0.125]
   transform_params:
     sigma_affine: 0.05

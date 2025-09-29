@@ -129,7 +129,7 @@ def train(config, generator, region_predictor, bg_predictor, checkpoint, log_dir
                 save_file = os.path.join(config["imgshots"], save_name)
                 imageio.imsave(save_file, save_image)
 
-            if actual_step % config["save_ckpt_freq"] == 0 and cnt != 0:
+            if actual_step % train_params["save_ckpt_freq"] == 0 and cnt != 0:
                 print('taking snapshot...')
                 torch.save({'example': actual_step * train_params["batch_size"],
                             'epoch': epoch_cnt,
